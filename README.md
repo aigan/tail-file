@@ -50,33 +50,34 @@ mytail.on('restart', reason => {
 mytail.start();
 ```
 
+## Options
+
 All internals are exposed in the object. Use with care. :)
 
 You can also set or replace any of the properties or methods by passing them in as a options parameter.
 
-## Options
 
 ```js
 const mytail = new Tail( "filename", { ... options ... }, callback );
 ```
 
 *secondary* = ${filename}.1
-The file to tail if the primary `filename` is not found. 
+>The file to tail if the primary `filename` is not found. 
 
 *startPos* = 'end'
-Where to start tailing. It can be `start` or `end` or an actual byte position in the file.
+>Where to start tailing. It can be `start` or `end` or an actual byte position in the file.
 
 *cutoff* = 5000
-New files appearing after tailing started, will be tailed from the start, unless they are larger than this many bytes, in which case they will be tailed from the tail.
+>New files appearing after tailing started, will be tailed from the start, unless they are larger than this many bytes, in which case they will be tailed from the tail.
 
 *force* = false
-If force is true, it will start waiting for a file to tail even if it can't find the file and also can't find the secondary file. The default is to send an error message with `ENOENT` telling that it can't find the file.
+>If force is true, it will start waiting for a file to tail even if it can't find the file and also can't find the secondary file. The default is to send an error message with `ENOENT` telling that it can't find the file.
 
 *sep* = \n
-The line separator. May be a regexp. For example `/\r?\n/`.
+>The line separator. May be a regexp. For example `/\r?\n/`.
 
 *encoding* = utf8
-Any encoding recognized by nodes StringDecoder. This includes ucs2, utf16le, latin1, base64 and more.
+>Any encoding recognized by nodes StringDecoder. This includes ucs2, utf16le, latin1, base64 and more.
 
 There are other properties that can be read or modified. Take a look in the source.
 
