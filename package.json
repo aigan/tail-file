@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Tail files fast, easy, persistent, fault tolerant and flexible",
   "main": "tail.js",
+  "engines": {
+    "node": ">=8.0"
+  },
   "scripts": {
     "test": "mocha"
   },

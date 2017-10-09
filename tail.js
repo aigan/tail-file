@@ -61,7 +61,7 @@ class Tail extends EventEmitter {
 		@prop {number} fd - Current file descriptor
 		@prop {number} ino - Current file inode
 		@prop {string|number} startPos - 'end', 'start' or pos for next start
-		@prop {number} cutoff - max file size for starting at the top
+		@prop {number} cutoff=5000 - max file size for starting at the top
 		@prop {boolean} force - start even if no files found
 		@prop {string|RegExp} sep=\n - Line separator
 		@prop {string} encoding=utf8 - Any encoding recognized by StringDecoder
@@ -250,6 +250,7 @@ createReader(){
 }
 
 readStuff(){
+	if( !this.started ) return;
 	this.createReader();
 	if( this.fd == 'init' ) return;
 	if( this.pos == 'init' ) return;
