@@ -1,0 +1,39 @@
+{
+  "name": "tail-file",
+  "version": "1.0.0",
+  "description": "Tail files fast, easy, persistent, fault tolerant and flexible",
+  "main": "tail.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aigan/tail-file.git"
+  },
+  "keywords": [
+    "async",
+    "log",
+    "realtime",
+    "logging",
+    "simple",
+    "events",
+    "fs",
+    "watch",
+    "reload",
+    "performance"
+  ],
+  "author": "Jonas Liljegren <jonas@liljegren.org> (http://jonas.liljegren.org/)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/aigan/tail-file/issues"
+  },
+  "homepage": "https://github.com/aigan/tail-file#readme",
+  "dependencies": {
+    "debug": "^3.1.0"
+  },
+  "devDependencies": {
+    "chai": "^4.1.2",
+    "mocha": "^4.0.1",
+    "tmp": "0.0.33"
+  }
+}
