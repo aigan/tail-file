@@ -1,9 +1,6 @@
 # tail-file
 Node module for tailing files. Fast, easy, persistent, fault tolerant and flexible.
 
-* [[Atlas]]
-* [[RG6]]
-
 ```js
 const Tail = require('tail-file');
 const mytail = new Tail("myfile.log", line => {
