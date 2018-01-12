@@ -1,6 +1,6 @@
 {
   "name": "tail-file",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tail files fast, easy, persistent, fault tolerant and flexible",
   "main": "tail.js",
   "engines": {
