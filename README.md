@@ -37,6 +37,8 @@ mytail.on('line', line => console.log(line) );
 
 mytail.on('ready', fd => console.log("All line are belong to us") );
 
+mytail.on('eof', pos => console.log("Catched up to the last line") );
+
 mytail.on('skip', pos => console.log("myfile.log suddenly got replaced with a large file") );
 
 mytail.on('secondary', filename => console.log(`myfile.log is missing. Tailing ${filename} instead`) );

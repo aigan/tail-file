@@ -18,6 +18,10 @@ const debug = require('debug')('tail');
 	@event Tail#ready
 	@param {number} fd - The file descriptor
 
+	All lines recieved
+	@event Tail#eof
+	@param {number} position
+
 	Would start tailing a new file from start, but file to large
 	@event Tail#skip
 	@param {number} position
@@ -326,6 +330,8 @@ onEndOfFile(){
 			this.emit('restart','TRUNCATE');
 			return setImmediate( this.start.bind(this) );
 		}
+
+		this.emit('eof', this.pos);
 	});
 
 }
