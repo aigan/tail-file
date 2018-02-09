@@ -55,9 +55,9 @@ mytail.start();
 
 ## Continue tail at last known position
 
-If you want to start where you left of the tail and not miss any lines, even if the last known line has been logrotated, you can use `findStart()`.
+If you want to start where you left of the tail and not miss any lines, even if the last known line has been log rotated, you can use `findStart()`.
 
-It will start the tail at the line matching the given regexp that passes the comparison test. Suitable for logfiles that has sorted values, like timestamps or number sequences.
+It will start the tail at the line matching the given regexp that passes the comparison test. Suitable for log files that has sorted values, like timestamps or number sequences.
 
 If the first matching line of the file comes after the target position, it will look for the target line in the secondary file. If the line is found in the secondary file, the tail will start. After all the lines of the secondary file has been reported, the tail will continue with the primary file as usual.
 
@@ -79,7 +79,7 @@ A compare function for finding starting line. For each line matching the match r
 
 Returns a promise that are resolved when the start was found and the tailing started.
 
-If the log contains a line before the target, followed by a line after the target, we will start the tailing with the first line after the line before the target, that matches the regexp. You can set up any special logic for handling this case in the ecent handler for lines, after the tailing has started.
+If the log contains a line before the target, followed by a line after the target, we will start the tailing with the first line after the line before the target, that matches the regexp. You can set up any special logic for handling this case in the event handler for lines, after the tailing has started.
 
 The promise will be rejected if there was an error reading the files or if the target line wasn't found in the primary or secondary file.
 
@@ -91,7 +91,7 @@ This will continue the tail at the line matching the date. This example uses ISO
 
 ```	
 const timestamp = '2020-01-01 00:00:00';
-mytail.findStart( /^(\w+ \w+)/, date => timestamp.localeCompare(date)  );
+mytail.findStart( /^(\d+-\d+-\d+ \d+:\d+:\d+)/, date => timestamp.localeCompare(date)  );
 ```
 
 ## Options
