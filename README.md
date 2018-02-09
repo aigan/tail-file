@@ -18,6 +18,7 @@ It will deliver new lines from a file.
  * But it will always finish up reading the rest of the lines from the current file. Not getting distracted by empty files.
  * When switching to a new file, it will start from the beginning, as to not miss any rows.
  * except if the new file actually was copied or moved into place, with too many existing rows, in which case it will continue from the bottom.
+ * You can let tail-file search for the starting position, and it will continue at that position, even if it's in the secondary file.
  * It will never throw exceptions. No matter what type of errors. All errors are emitted as messages.
  * All the code is asynchronous. No waiting on file system. Tried to avoid all race conditions.
  * And most of this is very configurable and hackable.
@@ -50,6 +51,47 @@ mytail.on('restart', reason => {
 });
 
 mytail.start();
+```
+
+## Continue tail at last known position
+
+If you want to start where you left of the tail and not miss any lines, even if the last known line has been logrotated, you can use `findStart()`.
+
+It will start the tail at the line matching the given regexp that passes the comparison test. Suitable for logfiles that has sorted values, like timestamps or number sequences.
+
+If the first matching line of the file comes after the target position, it will look for the target line in the secondary file. If the line is found in the secondary file, the tail will start. After all the lines of the secondary file has been reported, the tail will continue with the primary file as usual.
+
+### Syntax
+```
+tailObj.findStart( match, cmp )
+```
+
+### Parameters
+    {RegExp} match
+A regexp for finding starting line. The first captured substring will be sent to the comparison function. Lines not matching the regexp will be ignored.
+
+    {function} cmp
+A compare function for finding starting line. For each line matching the match regexp, the cmp function will be called with the first captured substring.
+
+`cmp` must return a positive number if the target line comes after the current line.
+
+### Return value
+
+Returns a promise that are resolved when the start was found and the tailing started.
+
+If the log contains a line before the target, followed by a line after the target, we will start the tailing with the first line after the line before the target, that matches the regexp. You can set up any special logic for handling this case in the ecent handler for lines, after the tailing has started.
+
+The promise will be rejected if there was an error reading the files or if the target line wasn't found in the primary or secondary file.
+
+If the `force` option is set to true, the tail will start even if there was an error.
+
+### Example
+
+This will continue the tail at the line matching the date. This example uses ISO Dates which can be compared as strings.
+
+```	
+const timestamp = '2020-01-01 00:00:00';
+mytail.findStart( /^(\w+ \w+)/, date => timestamp.localeCompare(date)  );
 ```
 
 ## Options

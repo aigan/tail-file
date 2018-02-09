@@ -46,6 +46,7 @@ const fs = require('fs');
 const { StringDecoder } = require('string_decoder');
 const path = require('path');
 const EventEmitter = require('events');
+const bufsize = 4096;
 
 class Tail extends EventEmitter {
 	/*
@@ -65,6 +66,8 @@ class Tail extends EventEmitter {
 		@prop {number} fd - Current file descriptor
 		@prop {number} ino - Current file inode
 		@prop {string|number} startPos - 'end', 'start' or pos for next start
+		@prop {number} posLast - pos of current line during findStart()
+		@prop {number} posNext - pos of next line during findStart()
 		@prop {number} cutoff=5000 - max file size for starting at the top
 		@prop {boolean} force - start even if no files found
 		@prop {string|RegExp} sep=\n - Line separator
@@ -142,7 +145,132 @@ class Tail extends EventEmitter {
 		});
 	}
 
+	findStart( match, cmp ){
+		/*
+			@param {RegExp} match - regexp for finding starting line
+			@param {function} cmp - compare function for finding starting line
+		 */
+
+		debug("Find start with", match);
+		return this
+			.findStartInFile( this.filename, match, cmp )
+			.catch( err =>{
+				if( err.code !== 'NOTFOUND' ) throw err;
+				this.err1 = err;
+			
+				debug(`Start not found in ${this.filename}. Trying ${this.secondary}`);
+				return this.findStartInFile( this.secondary, match, cmp );
+
+			})
+			.then( pos => {
+				this.setPos( pos );
+				debug(`Found start in ${this.started} at pos ${this.pos}`);
+
+				return this.tryTail( this.started );
+			})
+			.catch( err =>{
+				if( err.code !== 'NOTFOUND' ){
+					if( this.err1 ){ // report error for the primary file
+						this.onError( this.err1 );
+						delete this.err1;
+					} else {
+						this.onError( err );
+					}
+				} else {
+					err.message = "Start not found in primary or secondary file";
+					this.onError( err );
+				}
+				
+				if( this.force ){
+					return this.start();
+				}
+
+				return err;
+			});
+	}
+
+	findStartInFile( filename, match, cmp ){
+		/*
+			@param {string} filename - file to search for start
+			@param {RegExp} match - regexp for finding starting line
+			@param {function} cmp - compare function for finding starting line
+		 */
+
+		debug("Find start in", filename);
+
+		return new Promise( (resolve,reject)=>{
+			this.stop();
+			fs.stat( filename, ( err,stats )=>{
+				if( err ){
+					if( err.code !== 'ENOENT' ) return reject( err );
+					err.code = 'NOTFOUND'; // Tell caller to continue search
+					return reject( err );
+				}
+
+				this.started = filename;
+				this.sepG = new RegExp( this.sep, 'g' );
+				this.ino = stats.ino;
+				this.setPos( 0 );
+
+				debug('Looking for first line');
+				let posFound = -1;
+				
+				this.onLine = (err, line ) =>{
+					if( err ){
+						if( err.code != 'EOF' ) return reject( err );
+						
+						if( posFound >= 0 ){
+							err.message = `The target value comes after ` +
+								`the end of this file`;
+							return reject( err );
+						}
+
+						err.code = 'NOTFOUND'; // Might be in previous log
+						return reject( err );
+					}
+
+					const found = line.match( match );
+					if( !found ) return setImmediate( this.getNext.bind(this) );
+					const compared = cmp( found[1] );
+
+					//## Detaild debug for every line found
+					//debug( this.posLast, found[1], compared, line );
+
+					if( compared == 0 ){
+						return resolve( this.posLast );
+					}
+
+					if( compared < 0 ){ // target line is before this
+						if( posFound >= 0 ) return resolve( this.posLast );
+						
+						const err = new Error(`The found value ${found[1]} `+
+																	`comes before start of this file`)
+						err.code = 'NOTFOUND';
+						return reject( err );
+
+					}
+
+					if( compared > 0 ){ // target line is after this
+
+						// TODO: Jump around in file as to not have to read every
+						// single line. Will save time for large files!
+
+						posFound = this.posLast;
+						return setImmediate( this.getNext.bind(this) );
+					}
+
+					throw new Error("Given comparison function returned " + compared);
+				};
+
+				this.readNext();
+
+			});
+		});
+	}
+	
 	async tryTail( filename ){
+		if( this.started && this.started !== filename ) this.stop();
+
 		this.started = filename;
 		this.watcher = fs.watch(filename );
 		fs.stat(filename, this.getStat.bind(this) );
@@ -178,7 +306,7 @@ class Tail extends EventEmitter {
 		if( this.fd ) return this.readStuff();
 
 		this.stop();
-		this.startPos = 'start';
+		this.setPos(0);
 		this.emit('restart','PRIMEFOUND');
 		return setImmediate( this.start.bind(this) );
 	}
@@ -186,12 +314,15 @@ class Tail extends EventEmitter {
 	onError( err ){
 		// handle all file and watcher errors
 		this.stop();
-		this.emit( 'error', err );
 		debug( err );
+		this.emit( 'error', err );
 	}
 
 	stop(){
-		debug(`Stops tail of ${this.started}`);
+		if( this.started ){
+			debug(`Stops tail of ${this.started}`);
+		}
+		
 		if( this.dirwatcher ){
 			this.dirwatcher.close();
 			delete this.dirwatcher;
@@ -262,8 +393,6 @@ class Tail extends EventEmitter {
 		this.reading = true;
 
 		//debug("Starts reading at " + this.pos);
-		//const bufsize = 6; for tests
-		const bufsize = 4096;
 		if(!this.buf) this.buf = Buffer.alloc(bufsize);
 		fs.read( this.fd, this.buf, 0, bufsize, this.pos, this.parseStuff.bind(this) );
 	}
@@ -284,9 +413,13 @@ class Tail extends EventEmitter {
 		// Everything else comes down to this line
 		const newLines = (this.txt+data).split(this.sep);
 
+		// this.txt will be the content after the last linebreak. For the
+		// end of file, it will be an empty string if the file ended with
+		// a linebreak.
 		this.txt = newLines.pop();
 
 		for( let line of newLines ){
+			//debug( "Line »" + line + '«' );
 			this.emit('line', line );
 		}
 
@@ -296,7 +429,7 @@ class Tail extends EventEmitter {
 	}
 
 	onEndOfFile(){
-		//debug("End of file\n");
+		debug("End of file\n");
 		//debug("Should we switch the streams?");
 		fs.stat(this.filename, (err,stat) =>{
 			if( err ){
@@ -315,7 +448,7 @@ class Tail extends EventEmitter {
 				if( stat.size ){
 					debug("Switching over to the new file");
 					this.stop();
-					this.startPos = 'start';
+					this.setPos(0);
 					this.emit('restart','NEWPRIME');
 					return setImmediate( this.start.bind(this) );
 				}
@@ -326,7 +459,7 @@ class Tail extends EventEmitter {
 			} else if( stat.size < this.pos ){
 				debug("File truncated");
 				this.stop();
-				this.startPos = 'start';
+				this.setPos(0);
 				this.emit('restart','TRUNCATE');
 				return setImmediate( this.start.bind(this) );
 			}
@@ -335,6 +468,89 @@ class Tail extends EventEmitter {
 		});
 
 	}
+
+	setPos( pos ){
+		this.startPos = pos;
+		if( pos == 'start' ) pos = 0;
+		this.posLast = pos;
+		this.posNext = pos;
+		this.pos = pos;
+		this.txt = '';
+	}
+	
+	createReaderForNext(){
+		if( this.fd ) return;
+		this.fd = 'init';
+		fs.open(this.started,'r', (err,fd) =>{
+			if(err) return this.onLine( err );
+			if(!this.fd){ // in the middle of stop()
+				debug("Closing2 fd " + this.fd);
+				fs.close( fd, err =>{
+					if( err ) return debug( "closing " + err );
+				});
+				return;
+			}
+			debug("Opened file as fd " + fd);
+			this.fd = fd;
+			this.readNext();
+		});
+	}
+
+	readNext(){
+		if( !this.started ) return;
+		this.createReaderForNext();
+		if( this.fd == 'init' ) return;
+		if( this.pos == 'init' ) return;
+		if( this.reading ) return;
+		this.reading = true;
+
+		if(!this.buf) this.buf = Buffer.alloc(bufsize);
+		fs.read( this.fd, this.buf, 0, bufsize, this.pos,
+						 this.appendForNext.bind(this) );
+	}
+
+	appendForNext(err, bytesRead, buf ){
+		this.reading = false;
+		if( err ) return this.onLine( err );
+
+		if( bytesRead == 0 ){
+			this.txt += this.decoder.end(); // might have partial characters
+			return this.onEndOfFileForNext();
+		}
+
+		this.pos += bytesRead;
+		this.txt += this.decoder.write( buf.slice(0,bytesRead) );
+
+		this.getNext();
+	}
+
+	getNext(){
+		const found = this.sepG.exec( this.txt );
+		//debug("Textbuffer: " + this.txt);
+		if( !found ) return this.readNext();
+		//debug( found );
+		
+		const line = this.txt.substr( 0, found.index );
+		
+		this.posLast = this.posNext;
+		this.posNext += this.sepG.lastIndex;
+
+		
+		this.txt = this.txt.substr( this.sepG.lastIndex );
+		this.sepG.lastIndex = 0;
+		//debug( "Rest " + this.txt );
+		//debug( "Line »" + line + '«' );
+		
+		return this.onLine( null, line );
+	}
+
+	onEndOfFileForNext(){
+		debug("End of file for next\n");
+		const err =  new Error("EOF");
+		err.code = 'EOF';
+		return this.onLine( err );
+	}
+
 }
 
 module.exports = Tail;
