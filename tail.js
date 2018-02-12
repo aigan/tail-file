@@ -429,7 +429,7 @@ class Tail extends EventEmitter {
 	}
 
 	onEndOfFile(){
-		debug("End of file\n");
+		debug("End of file");
 		//debug("Should we switch the streams?");
 		fs.stat(this.filename, (err,stat) =>{
 			if( err ){
@@ -454,8 +454,9 @@ class Tail extends EventEmitter {
 				}
 
 				// Wait until it has something to read
-				return this.watchForPrimary();
+				this.watchForPrimary();
 
+				// Continue to emit that we reached eof				
 			} else if( stat.size < this.pos ){
 				debug("File truncated");
 				this.stop();
@@ -545,7 +546,7 @@ class Tail extends EventEmitter {
 	}
 
 	onEndOfFileForNext(){
-		debug("End of file for next\n");
+		debug("End of file for next");
 		const err =  new Error("EOF");
 		err.code = 'EOF';
 		return this.onLine( err );
