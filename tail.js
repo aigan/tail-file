@@ -209,14 +209,16 @@ class Tail extends EventEmitter {
 
 				debug('Looking for first line');
 				let posFound = -1;
+				let valFound;
 				
 				this.onLine = (err, line ) =>{
 					if( err ){
 						if( err.code != 'EOF' ) return reject( err );
 						
 						if( posFound >= 0 ){
-							err.message = `The target value comes after ` +
-								`the end of this file`;
+							err.message =
+								`The last matched line has the value ${valFound}. `+
+								`The target value comes after the end of this file.`;
 							return reject( err );
 						}
 
@@ -254,6 +256,7 @@ class Tail extends EventEmitter {
 						// single line. Will save time for large files!
 
 						posFound = this.posLast;
+						valFound = found[1];
 						return setImmediate( this.getNext.bind(this) );
 					}
 
