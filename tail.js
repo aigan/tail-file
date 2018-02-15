@@ -155,12 +155,10 @@ class Tail extends EventEmitter {
 		return this
 			.findStartInFile( this.filename, match, cmp )
 			.catch( err =>{
-				if( err.code !== 'NOTFOUND' ) throw err;
+				if( !['NOTFOUND','ENOENT'].includes( err.code ) ) throw err;
 				this.err1 = err;
-			
-				debug(`Start not found in ${this.filename}. Trying ${this.secondary}`);
+				debug( 'Primary file', err.toString() );
 				return this.findStartInFile( this.secondary, match, cmp );
-
 			})
 			.then( pos => {
 				this.setPos( pos );
@@ -169,18 +167,19 @@ class Tail extends EventEmitter {
 				return this.tryTail( this.started );
 			})
 			.catch( err =>{
-				if( err.code !== 'NOTFOUND' ){
-					if( this.err1 ){ // report error for the primary file
-						this.onError( this.err1 );
-						delete this.err1;
-					} else {
-						this.onError( err );
-					}
-				} else {
+				if( this.err1 ){
+					// report error for the primary file
+					err.primary_error = this.err1
+					delete this.err1;
+				}
+
+				if( err.code == 'NOTFOUND' ){
+					err.secondary_error = new Error(`${this.secondary}: ${err.message}`);
 					err.message = "Start not found in primary or secondary file";
-					this.onError( err );
 				}
 				
+				this.onError( err );
+
 				if( this.force ){
 					return this.start();
 				}
@@ -201,11 +200,7 @@ class Tail extends EventEmitter {
 		return new Promise( (resolve,reject)=>{
 			this.stop();
 			fs.stat( filename, ( err,stats )=>{
-				if( err ){
-					if( err.code !== 'ENOENT' ) return reject( err );
-					err.code = 'NOTFOUND'; // Tell caller to continue search
-					return reject( err );
-				}
+				if( err ) return reject( err );
 
 				this.started = filename;
 				this.sepG = new RegExp( this.sep, 'g' );
@@ -243,8 +238,11 @@ class Tail extends EventEmitter {
 					if( compared < 0 ){ // target line is before this
 						if( posFound >= 0 ) return resolve( this.posLast );
 						
-						const err = new Error(`The found value ${found[1]} `+
-																	`comes before start of this file`)
+						const msg =
+									`The first matched line has the value ${found[1]}. `+
+									`The target value are probably in an older file.`;
+
+						const err = new Error( msg )
 						err.code = 'NOTFOUND';
 						return reject( err );
 
@@ -314,7 +312,7 @@ class Tail extends EventEmitter {
 	onError( err ){
 		// handle all file and watcher errors
 		this.stop();
-		debug( err );
+		debug( 'Emitting', err );
 		this.emit( 'error', err );
 	}
 
@@ -547,7 +545,7 @@ class Tail extends EventEmitter {
 
 	onEndOfFileForNext(){
 		debug("End of file for next");
-		const err =  new Error("EOF");
+		const err =  new Error("End of file");
 		err.code = 'EOF';
 		return this.onLine( err );
 	}
