@@ -8,20 +8,17 @@ const mytail = new Tail("myfile.log", line => {
 });
 ```
 
-## Features
+## Promises
 
-It will deliver new lines from a file.
- * Without delay. It's using `fs.watch`. No poll interval.
- * Even if you move the file, as with a log rotation.
- * Even if you restart the program in the middle of the log rotation, by tailing the secondary file.
- * When the file has been moved and new lines starts appearing in the original location, it will switch over to the new file.
- * But it will always finish up reading the rest of the lines from the current file. Not getting distracted by empty files.
- * When switching to a new file, it will start from the beginning, as to not miss any rows.
- * except if the new file actually was copied or moved into place, with too many existing rows, in which case it will continue from the bottom.
- * You can let tail-file search for the starting position, and it will continue at that position, even if it's in the secondary file.
- * It will never throw exceptions. No matter what type of errors. All errors are emitted as messages.
- * All the code is asynchronous. No waiting on file system. Tried to avoid all race conditions.
- * And most of this is very configurable and hackable.
+```js
+try {
+		await mytail.startP();
+		const line = await mytail.nextLine();
+}
+catch( err ){
+		throw( err );
+}
+```
 
 ## Events
 
@@ -30,7 +27,7 @@ With no callback provided, the tailing will not start until you tell it to. Here
 ```js
 const Tail = require('tail-file');
 
-const mytail = new Tail("myfile.log");
+const mytail = new Tail("myfile.log"); // absolute or relative path
 
 mytail.on('error', err => throw(err) );
 
@@ -52,6 +49,21 @@ mytail.on('restart', reason => {
 
 mytail.start();
 ```
+
+## Features
+
+It will deliver new lines from a file.
+ * Without delay. It's using `fs.watch`. No poll interval.
+ * Even if you move the file, as with a log rotation.
+ * Even if you restart the program in the middle of the log rotation, by tailing the secondary file.
+ * When the file has been moved and new lines starts appearing in the original location, it will switch over to the new file.
+ * But it will always finish up reading the rest of the lines from the current file. Not getting distracted by empty files.
+ * When switching to a new file, it will start from the beginning, as to not miss any rows.
+ * except if the new file actually was copied or moved into place, with too many existing rows, in which case it will continue from the bottom.
+ * You can let tail-file search for the starting position, and it will continue at that position, even if it's in the secondary file.
+ * It will never throw exceptions. No matter what type of errors. All errors are emitted as messages.
+ * All the code is asynchronous. No waiting on file system. Tried to avoid all race conditions.
+ * And most of this is very configurable and hackable.
 
 ## Continue tail at last known position
 

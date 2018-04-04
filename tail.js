@@ -145,6 +145,29 @@ class Tail extends EventEmitter {
 		});
 	}
 
+	startP(){
+		this.start();
+		if( this.fd ) return Promise.resolve();
+		
+		return new Promise( (resolve,reject) =>{
+
+			function errorListener( err ){
+				this.removeListener('ready',  readyListener);
+				this.removeListener('error',  errorListener);
+				reject( err );
+			}
+
+			function readyListener(){
+				this.removeListener('ready',  readyListener);
+				this.removeListener('error',  errorListener);
+				resolve();
+			}
+			
+			this.on('error', errorListener );
+			this.on('ready', readyListener );
+		});
+	}
+	
 	findStart( match, cmp ){
 		/*
 			@param {RegExp} match - regexp for finding starting line
@@ -269,9 +292,15 @@ class Tail extends EventEmitter {
 		});
 	}
 	
+
+	nextLine(){
+		return new Promise( resolve => this.once('line', resolve ) );
+	}
+													
 	async tryTail( filename ){
 		if( this.started && this.started !== filename ) this.stop();
-
+		// Might be started by findStart()
+		
 		this.started = filename;
 		this.watcher = fs.watch(filename );
 		fs.stat(filename, this.getStat.bind(this) );
@@ -299,8 +328,7 @@ class Tail extends EventEmitter {
 	}
 
 	checkDir(type, name ){
-		//debug(`Dir ${type}: ${name}`);
-		if( name !== this.filename ) return;
+		if( name !== path.basename( this.filename ) ) return;
 		debug(`Dir ${type}: ${name}`);
 
 		// It will decide if it's time to switch over
