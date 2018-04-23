@@ -141,4 +141,4 @@ There are other properties that can be read or modified. Take a look in the sour
 
 This module was partly inspired by [always-tail](https://github.com/jandre/always-tail)
 
-No care has been given to make this module work on older versions of node. Developed and tested on GNU/Linux. But it should work on other platforms.
+No care has been given to make this module work on older versions of node. Tested on Linux and Windows. But it should work on other platforms.

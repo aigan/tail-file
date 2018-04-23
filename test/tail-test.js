@@ -7,7 +7,6 @@ const tmp = require('tmp');
 const path = require('path');
 const fs = require('fs');
 const util = require('util');
-const unlink = util.promisify(fs.unlink);
 const open = util.promisify(fs.open);
 const rename = util.promisify(fs.rename);
 
@@ -28,30 +27,25 @@ function event( emitter, type ){
 }
 
 after(async()=>{
-	await unlink( filename ).catch(X=>{});
-	await unlink( secondary ).catch(X=>{});
-	dir.removeCallback();
+	try{ fs.unlinkSync( filename ) } catch(err){};
+	try{ fs.unlinkSync( secondary ) } catch(err){};
 });
 
 describe('Tail default', function(){
 
 	// Just in case the file exists from previous tests
 	before(async ()=>{
-		await unlink( filename ).catch(X=>{});
-		await unlink( secondary ).catch(X=>{});
+		try{ fs.unlinkSync( filename ) } catch(err){};
+		try{ fs.unlinkSync( secondary ) } catch(err){};
 		return;
 	});
 
-//	afterEach(()=>{
-//		if( tail1.stop ) tail1.stop();
-//	});
-	
 	it("emits error ENOENT if missing", done =>{
 		const tail1 = new Tail(filename);
 
 		tail1.once('error', err=>{
-			if( err.code == 'ENOENT' ) return done();
 			tail1.stop();
+			if( err.code == 'ENOENT' ) return done();
 			done( err );
 		});
 		tail1.once('ready', X=>{
@@ -62,6 +56,7 @@ describe('Tail default', function(){
 	});
 
 	it("emits ready if file exists", done =>{
+        debug('start emits ready if file exists');
 		const tail1 = new Tail(filename);
 		(async()=>{
 			const fd = await open( filename, 'a');
@@ -107,6 +102,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
+        fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -116,6 +112,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
+        fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -128,6 +125,7 @@ describe('Appending', function(){
 		debug(`Appending to fd ${t.fd2}`);
 
 		fs.writeSync(t.fd2, `Row ${nr}\n`);
+        fs.fsyncSync(t.fd2);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -137,6 +135,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
+        fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);

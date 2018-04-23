@@ -150,14 +150,14 @@ class Tail extends EventEmitter {
 		return new Promise( (resolve,reject) =>{
 
 			function errorListener( err ){
-				this.removeListener('ready',  readyListener);
-				this.removeListener('error',  errorListener);
+				this.removeListener('ready', readyListener);
+				this.removeListener('error', errorListener);
 				reject( err );
 			}
 
 			function readyListener(){
-				this.removeListener('ready',  readyListener);
-				this.removeListener('error',  errorListener);
+				this.removeListener('ready', readyListener);
+				this.removeListener('error', errorListener);
 				resolve();
 			}
 			
@@ -301,14 +301,20 @@ class Tail extends EventEmitter {
 		
 		this.started = filename;
 
-		const dirname = path.dirname( this.filename );
-		this.watcher = fs.watch( dirname );
+		fs.stat(filename, (err,stats) =>{
+			this.getStat( err, stats );
 
-		fs.stat(filename, this.getStat.bind(this) );
-		this.readStuff(); // Do not wait in case we don't start at the end
+			// Do not wait in case we don't start at the end
+			if( !err ) this.readStuff();
+		});
 
-		this.watcher.on('change', this.checkDir.bind(this) );
-		this.watcher.on('error', this.onError.bind(this) );
+		if( !this.watcher ){
+			const dirname = path.dirname( this.filename );
+			this.watcher = fs.watch( dirname );
+
+			this.watcher.on('change', this.checkDir.bind(this) );
+			this.watcher.on('error', this.onError.bind(this) );
+		}
 
 		if( filename == this.secondary ){
 			this.emit('secondary', this.secondary);
@@ -333,6 +339,7 @@ class Tail extends EventEmitter {
 	onError( err ){
 		// handle all file and watcher errors
 		this.stop();
+		//console.warn( new Error('Emitting error') );
 		debug( 'Emitting', err );
 		this.emit( 'error', err );
 	}
@@ -348,7 +355,7 @@ class Tail extends EventEmitter {
 		}
 
 		if( this.fd ){
-			if( this.fd !==  'init' ){
+			if( this.fd !==	 'init' ){
 				debug("Closing fd " + this.fd);
 				fs.close( this.fd, err =>{
 					if( err ) return debug( "closing1 " + err );
@@ -553,7 +560,7 @@ class Tail extends EventEmitter {
 
 	onEndOfFileForNext(){
 		debug("End of file for next");
-		const err =  new Error("End of file");
+		const err = new Error("End of file");
 		err.code = 'EOF';
 		return this.onLine( err );
 	}
