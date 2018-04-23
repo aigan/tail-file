@@ -9,7 +9,6 @@ const fs = require('fs');
 const util = require('util');
 const unlink = util.promisify(fs.unlink);
 const open = util.promisify(fs.open);
-const write = util.promisify(fs.write);
 const rename = util.promisify(fs.rename);
 
 const Tail = require('../tail');
@@ -66,7 +65,7 @@ describe('Tail default', function(){
 		const tail1 = new Tail(filename);
 		(async()=>{
 			const fd = await open( filename, 'a');
-			await write(fd, `Row ${++cnt}\n`);
+			fs.writeSync(fd, `Row ${++cnt}\n`);
 
 			tail1.once('ready', fd=>{
 				expect(fd).to.be.a('number');
@@ -78,26 +77,71 @@ describe('Tail default', function(){
 			tail1.start();
 		})();
 	});
-	
-	it("emits line on append", async function(){
-		const tail1 = new Tail(filename);
-		const nr = ++cnt;
-
-		const fd = await open( filename, 'a');
-		debug(`Appending to fd ${fd}`);
-		
-		await tail1.startP();
-		
-		await write(fd, `Row ${nr}\n`);
-		const line = await tail1.nextLine();
-		debug("Recieved line " + line );
-		expect(line).to.be.eql(`Row ${nr}`);
-		
-		await tail1.stop();
-		fs.closeSync(fd);
-	});
 });
 
+describe('Appending', function(){
+
+	const t = {};
+
+	// Just in case the file exists from previous tests
+	before(async ()=>{
+		//await unlink( filename ).catch(X=>{});
+		//await unlink( secondary ).catch(X=>{});
+
+		t.fd = await open( filename, 'a');
+		debug(`Appending to fd ${t.fd}`);
+
+		t.tail1 = new Tail(filename);
+		await t.tail1.startP();
+
+		return;
+	});
+	
+	after(async()=>{
+		await t.tail1.stop();
+		fs.closeSync(t.fd);	
+		fs.closeSync(t.fd2);	
+	});
+
+	it("emits line on append", async function(){
+		const nr = ++cnt;
+
+		fs.writeSync(t.fd, `Row ${nr}\n`);
+		const line = await t.tail1.nextLine();
+		debug("Recieved line " + line );
+		expect(line).to.be.eql(`Row ${nr}`);
+	});
+
+	it("emits line on second append", async function(){
+		const nr = ++cnt;
+
+		fs.writeSync(t.fd, `Row ${nr}\n`);
+		const line = await t.tail1.nextLine();
+		debug("Recieved line " + line );
+		expect(line).to.be.eql(`Row ${nr}`);
+	});
+
+	it("emits line after append from other source", async function(){
+		const nr = ++cnt;
+
+		t.fd2 = await open( filename, 'a');
+		debug(`Appending to fd ${t.fd2}`);
+
+		fs.writeSync(t.fd2, `Row ${nr}\n`);
+		const line = await t.tail1.nextLine();
+		debug("Recieved line " + line );
+		expect(line).to.be.eql(`Row ${nr}`);
+	});
+
+	it("emits line after append from first source again", async function(){
+		const nr = ++cnt;
+
+		fs.writeSync(t.fd, `Row ${nr}\n`);
+		const line = await t.tail1.nextLine();
+		debug("Recieved line " + line );
+		expect(line).to.be.eql(`Row ${nr}`);
+	});
+});
 
 describe('File rotation', function(){
 
@@ -145,7 +189,7 @@ async function appendRow( filename ){
 	const row = `Row ${nr}`;
 	const fd = await open( filename, 'a');
 	debug(`Appending to fd ${fd}: ${row}`);
-	await write(fd, row + "\n" );
+	fs.writeSync(fd, row + "\n" );
 	fs.closeSync(fd);
 	return row;
 }

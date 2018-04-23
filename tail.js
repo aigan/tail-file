@@ -90,7 +90,6 @@ class Tail extends EventEmitter {
 			txt: "",
 			ino: null,
 			watcher: null,
-			dirwatcher: null,
 			startPos: 'end',
 			cutoff: 5000,
 			force: false,
@@ -140,7 +139,6 @@ class Tail extends EventEmitter {
 
 			if( this.force ){
 				this.started = this.filename;
-				this.watchForPrimary();
 			}
 		});
 	}
@@ -302,37 +300,29 @@ class Tail extends EventEmitter {
 		// Might be started by findStart()
 		
 		this.started = filename;
-		this.watcher = fs.watch(filename );
+
+		const dirname = path.dirname( this.filename );
+		this.watcher = fs.watch( dirname );
+
 		fs.stat(filename, this.getStat.bind(this) );
 		this.readStuff(); // Do not wait in case we don't start at the end
 
-		this.watcher.on('change', this.readStuff.bind(this) ); // even if rename
+		this.watcher.on('change', this.checkDir.bind(this) );
 		this.watcher.on('error', this.onError.bind(this) );
 
 		if( filename == this.secondary ){
 			this.emit('secondary', this.secondary);
-			this.watchForPrimary();
 		}
 	}
 
-	watchForPrimary(){
-		if( this.dirwatcher ) return;
-
-		debug(`Start watching for the return of ${this.filename}`);
-
-		const dirname = path.dirname( this.filename );
-
-		this.dirwatcher = fs.watch( dirname );
-		this.dirwatcher.on('change', this.checkDir.bind(this) );
-		this.dirwatcher.on('error', this.onError.bind(this) );
-	}
-
 	checkDir(type, name ){
-		if( name !== path.basename( this.filename ) ) return;
 		debug(`Dir ${type}: ${name}`);
 
 		// It will decide if it's time to switch over
 		if( this.fd ) return this.readStuff();
+
+		const basename = path.basename( this.filename );
+		if( name !== basename ) return;
 
 		this.stop();
 		this.setPos(0);
@@ -350,11 +340,6 @@ class Tail extends EventEmitter {
 	stop(){
 		if( this.started ){
 			debug(`Stops tail of ${this.started}`);
-		}
-		
-		if( this.dirwatcher ){
-			this.dirwatcher.close();
-			delete this.dirwatcher;
 		}
 		
 		if( this.watcher ){
@@ -462,14 +447,7 @@ class Tail extends EventEmitter {
 		//debug("Should we switch the streams?");
 		fs.stat(this.filename, (err,stat) =>{
 			if( err ){
-				if( debug.enabled ){
-					if( err.code == 'ENOENT' ){
-						if( !this.dirwatcher ) debug(`${this.filename} does not exist`);
-					}
-					else debug(err);
-				}
-				
-				this.watchForPrimary(); // usually the right response
+				debug( err );
 				return;
 			}
 			
@@ -483,7 +461,6 @@ class Tail extends EventEmitter {
 				}
 
 				// Wait until it has something to read
-				this.watchForPrimary();
 
 				// Continue to emit that we reached eof				
 			} else if( stat.size < this.pos ){
