@@ -109,9 +109,8 @@ class Tail extends EventEmitter {
 		if( !options ) options = {};
 		Object.assign( this, options );
 
+		this.searchFiles = this.searchFilesDefault,
 		this.decoder = new StringDecoder(this.encoding);
-
-		if( !this.secondary ) this.secondary = filename + ".1";
 
 		if( cb ){
 			this.on('line', cb);
@@ -127,8 +126,9 @@ class Tail extends EventEmitter {
 			if( err.code !== 'ENOENT' ) throw err;
 			this.err1 = err;
 			
-			debug(`${this.filename} gone. Trying ${this.secondary}`);
-			return this.tryTail( this.secondary );
+			const secondary = this.getSecondary();
+			debug(`${this.filename} gone. Trying ${secondary}`);
+			return this.tryTail( secondary );
 		}).catch( err =>{
 			if( this.err1 ){ // report error for the primary file
 				this.onError( this.err1 );
@@ -165,7 +165,19 @@ class Tail extends EventEmitter {
 			this.on('ready', readyListener );
 		});
 	}
+
+	getSecondary(){
+		const secondary =
+					this.secondary ||
+					this.searchFiles[Symbol.iterator]().next().value;
+		//console.log('secondary', secondary);
+		return secondary;
+	}
 	
+	get searchFilesDefault(){
+		return [`${this.filename}.1`];
+	}
+
 	findStart( match, cmp ){
 		/*
 			@param {RegExp} match - regexp for finding starting line
@@ -173,13 +185,14 @@ class Tail extends EventEmitter {
 		 */
 
 		debug("Find start with", match);
+		const secondary = this.getSecondary();
 		return this
 			.findStartInFile( this.filename, match, cmp )
 			.catch( err =>{
-				if( !['NOTFOUND','ENOENT'].includes( err.code ) ) throw err;
+				if( !['NOTFOUND','ENOENT','TARGETOLDER'].includes( err.code ) ) throw err;
 				this.err1 = err;
 				debug( 'Primary file', err.toString() );
-				return this.findStartInFile( this.secondary, match, cmp );
+				return this.findStartInFile( secondary, match, cmp );
 			})
 			.then( pos => {
 				this.setPos( pos );
@@ -194,8 +207,11 @@ class Tail extends EventEmitter {
 					delete this.err1;
 				}
 
+				debug('findStart', err.code, err.message);
+				if( err.code === 'TARGETOLDER' ) err.code = 'NOTFOUND';
+				
 				if( err.code == 'NOTFOUND' ){
-					err.secondary_error = new Error(`${this.secondary}: ${err.message}`);
+					err.secondary_error = new Error(`${secondary}: ${err.message}`);
 					err.message = "Start not found in primary or secondary file";
 				}
 				
@@ -266,7 +282,7 @@ class Tail extends EventEmitter {
 									`The target value are probably in an older file.`;
 
 						const err = new Error( msg )
-						err.code = 'NOTFOUND';
+						err.code = 'TARGETOLDER';
 						return reject( err );
 
 					}
@@ -295,30 +311,37 @@ class Tail extends EventEmitter {
 		return new Promise( resolve => this.once('line', resolve ) );
 	}
 													
-	async tryTail( filename ){
-		if( this.started && this.started !== filename ) this.stop();
-		// Might be started by findStart()
-		
-		this.started = filename;
+	tryTail( filename ){
+		return new Promise( (resolve,reject) =>{
+			if( this.started && this.started !== filename ) this.stop();
+			// Might be started by findStart()
+			
+			this.started = filename;
 
-		fs.stat(filename, (err,stats) =>{
-			this.getStat( err, stats );
+			fs.stat(filename, (err,stats) =>{
+				if( err ) return reject( err );
 
-			// Do not wait in case we don't start at the end
-			if( !err ) this.readStuff();
+				this.getStat( err, stats );				
+				
+				// Do not wait in case we don't start at the end
+				this.readStuff();
+				return resolve();
+			});
+
+			if( !this.watcher ){
+				const dirname = path.dirname( this.filename );
+				this.watcher = fs.watch( dirname );
+
+				this.watcher.on('change', this.checkDir.bind(this) );
+				this.watcher.on('error', this.onError.bind(this) );
+			}
+
+			const secondary = this.getSecondary();
+			if( filename === secondary ){
+				this.emit('secondary', secondary);
+			}
+
 		});
-
-		if( !this.watcher ){
-			const dirname = path.dirname( this.filename );
-			this.watcher = fs.watch( dirname );
-
-			this.watcher.on('change', this.checkDir.bind(this) );
-			this.watcher.on('error', this.onError.bind(this) );
-		}
-
-		if( filename == this.secondary ){
-			this.emit('secondary', this.secondary);
-		}
 	}
 
 	checkDir(type, name ){
