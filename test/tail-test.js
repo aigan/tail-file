@@ -58,7 +58,7 @@ describe('Tail default', function(){
 	});
 
 	it("emits ready if file exists", done =>{
-        debug('start emits ready if file exists');
+    debug('start emits ready if file exists');
 		const tail1 = new Tail(filename);
 		(async()=>{
 			const fd = await open( filename, 'a');
@@ -127,7 +127,7 @@ describe('Appending', function(){
 		debug(`Appending to fd ${t.fd2}`);
 
 		fs.writeSync(t.fd2, `Row ${nr}\n`);
-        fs.fsyncSync(t.fd2);
+    fs.fsyncSync(t.fd2);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -137,7 +137,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
-        fs.fsyncSync(t.fd);
+    fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -214,24 +214,24 @@ describe('File rotation', function(){
 
 });
 
-xdescribe('Find start', function(){
+describe('Find start', function(){
 
-	const tail1 = new Tail( filename(0) );
-
-	function filename(no){
+	const tail1 = new Tail( fname(0) );
+	const lines = [];
+	let fd, rowcnt = 0;
+	
+	function fname(no){
 		return path.join(dir.name, "multi.log" + (no?`.${no}`:'') );
 	}
 	
+	function rowtext(){
+		return `Row ${++rowcnt}\n`;
+	}
+
 	before( async ()=>{
-		let fd, rowcnt = 0;
-
-		function rowtext(){
-			return `Row ${++rowcnt}\n`;
-		}
-
 		function zip(no){
 			return new Promise( (resolve,reject)=>{
-				const name = filename(no);
+				const name = fname(no);
 				const gzip = zlib.createGzip();
 				const inp = fs.createReadStream( name );
 				const out = fs.createWriteStream( `${name}.gz` );
@@ -241,44 +241,126 @@ xdescribe('Find start', function(){
 			});
 		}
 
-		fd = await open( filename(3), 'w');
+		fd = await open( fname(3), 'w');
 		fs.writeSync(fd, "stuff\n");
 		fs.writeSync(fd, rowtext());
 		fs.writeSync(fd, rowtext());
 		fs.writeSync(fd, rowtext());
 
-		fd = await open( filename(2), 'w');
+		fd = await open( fname(2), 'w');
 		fs.writeSync(fd, "stuff\n");
 		fs.writeSync(fd, rowtext());
 		fs.writeSync(fd, "stuff\n");
 
-		fd = await open( filename(1), 'w');
+		fd = await open( fname(1), 'w');
 		fs.writeSync(fd, "stuff\n");
 
-		fd = await open( filename(0), 'w');
-		fs.writeSync(fd, "stuff\n");
+		fd = await open( fname(0), 'w');
+		fs.writeSync(fd, "\u261E \u26F9 \u2615 stop\n");
+		fs.writeSync(fd, rowtext());
 
-		fs.closeSync(fd);
-		await zip(2);
-		fs.unlinkSync( filename(2) );
-		
-		await zip(3);
-		fs.unlinkSync( filename(3) );
+		//fs.closeSync(fd);
+
+		await zip(2); fs.unlinkSync( fname(2) );
+		await zip(3); fs.unlinkSync( fname(3) );
+
+		tail1.on('line', line =>{
+			if( ! line.match(/^Row /) ) return;
+			lines.push(line);
+			debug('gotline');
+		});
+
 	});
 
+	after(async()=>{
+		debug('stop tail1');
+		await tail1.stop();
+		try{ fs.unlinkSync( fname(3)+".gz" ) } catch(err){};
+		try{ fs.unlinkSync( fname(2)+".gz" ) } catch(err){};
+		try{ fs.unlinkSync( fname(1) ) } catch(err){};
+		try{ fs.unlinkSync( fname(0) ) } catch(err){};		
+	});
+
+
+	let found = false;
 	it("finds start in older file", async function(){
-
 		const target = 2;
-		await tail1.findStart( /^Row (\d+)$/, str => target - str );
+		found = await tail1.findStart( /^Row (\d+)$/, str => target - str );
+	});
 
-		//tail1.searchFiles = [this.secondary];
+	it("processes files in order", function( done ){
+		expect(found).to.be.true;
+		tail1.once('eof', ()=>{
+			expect(lines).to.eql(['Row 2','Row 3','Row 4','Row 5']);
+			done();
+		});
+	});
 
-		for( let name of tail1.searchFiles ){
-			console.log('searching', name);
-		}
+	it("tails latest file", function( done ){
+		tail1.once('line', line =>{
+			expect(line).to.eq('Row 6');
+			done();
+		});
+		fs.writeSync(fd, rowtext());
+	});
+
+	xit("restarts at right position", function( done ){
+		const pos = tail1.pos;
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+		tail1.stop();
+		fs.closeSync(fd);
+
+		tail1.startPos = pos; // Explicitly not at end of file
+		tail1.once('line', line =>{
+			expect(line).to.eq('Row 7');
+			done();
+		});
+
+		tail1.start();
+	});
+});
+
+
+describe('Custom line-split', function(){
+
+	const tail1 = new Tail( filename );
+	const lines = [];
+	let fd, rowcnt = 0;
+	
+	function rowtext(){
+		return `Multiline\nRow ${++rowcnt}\n--end_of_rec--\n`;
+	}
+
+	before( async ()=>{
+
+		fd = await open( filename, 'w');
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+	});
+
+	after(async()=>{
+		debug('stop tail1');
+		await tail1.stop();
+	});
+
+
+	it("finds line with split spread over chunks", function( done ){
+		tail1.once('line', line =>{
+			expect(line).to.eq("Multiline\nRow 1");
+			done();
+		});
+		tail1.startPos = 'start';
+		tail1.sep = /\r?\n--end_of_rec--\r?\n/;
+		tail1._bufsize = 20; // test match spread over chunks
+		tail1.start();
+
+		debug('bufsize', tail1._bufsize);
 
 	});
 });
+
 
 async function appendRow( filename ){
 	const nr = ++cnt;

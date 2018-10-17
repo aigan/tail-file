@@ -45,6 +45,7 @@ mytail.on('restart', reason => {
   if( reason == 'PRIMEFOUND' ) console.log("Now we can finally start tailing. File has appeared");
   if( reason == 'NEWPRIME' ) console.log("We will switch over to the new file now");
   if( reason == 'TRUNCATE' ) console.log("The file got smaller. I will go up and continue");
+	if( reason == 'CATCHUP' ) console.log("We found a start in an earlier file and are now moving to the nextt one in the list");
 });
 
 mytail.start();
@@ -71,7 +72,9 @@ If you want to start where you left of the tail and not miss any lines, even if 
 
 It will start the tail at the line matching the given regexp that passes the comparison test. Suitable for log files that has sorted values, like timestamps or number sequences.
 
-If the first matching line of the file comes after the target position, it will look for the target line in the secondary file. If the line is found in the secondary file, the tail will start. After all the lines of the secondary file has been reported, the tail will continue with the primary file as usual.
+If the first matching line of the file comes after the target position, it will look for the target line in older files. If the line is found in an older file, the tail will start. After all the lines of the older files has been reported, the tail will continue with the primary file as usual.
+
+You can assign a function returning an iterable object to `secondaryFiles()`. It will default return filenames compatible with the default logrotate configuration. Files with `.gz` will be decompressed before parsing.
 
 ### Syntax
 ```
@@ -121,7 +124,7 @@ const mytail = new Tail( "filename", { ... options ... }, callback );
 >The file to tail if the primary `filename` is not found. 
 
 *startPos* = 'end'
->Where to start tailing. It can be `start` or `end` or an actual byte position in the file.
+>Where to start tailing. It can be `start` or `end` or an actual char position in the file. NB! Not to get mixed up with the byte postion of pos.
 
 *cutoff* = 5000
 >New files appearing after tailing started, will be tailed from the start, unless they are larger than this many bytes, in which case they will be tailed from the tail.
@@ -136,6 +139,10 @@ const mytail = new Tail( "filename", { ... options ... }, callback );
 >Any encoding recognized by nodes StringDecoder. This includes ucs2, utf16le, latin1, base64 and more.
 
 There are other properties that can be read or modified. Take a look in the source.
+
+## Caveat
+
+Current implementation reports the char position of lines rather than the byte position.
 
 ## Finally
 
