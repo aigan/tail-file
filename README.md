@@ -66,6 +66,22 @@ It will deliver new lines from a file.
  * All the code is asynchronous. No waiting on file system. Tried to avoid all race conditions.
  * And most of this is very configurable and hackable.
 
+
+## methods
+
+`start()` : Starts the tailing. No return value.
+
+`startP()` : Starts the tailng. Returns a promise.
+
+`getSecondary()` : Returns a promise for the secondary filename.
+
+`findStart()` : Starts tail from the row with the selected content. Returns a promise.
+
+`nextLine()` : Returns a promise for the next line.
+
+`stop()` : Stops the tailing. Returns a promise for completion.
+
+
 ## Continue tail at last known position
 
 If you want to start where you left of the tail and not miss any lines, even if the last known line has been log rotated, you can use `findStart()`.

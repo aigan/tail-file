@@ -33,6 +33,7 @@ after(async()=>{
 	try{ fs.unlinkSync( secondary ) } catch(err){};
 });
 
+
 describe('Tail default', function(){
 
 	// Just in case the file exists from previous tests
@@ -104,7 +105,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
-    fs.fsyncSync(t.fd);
+    //fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -114,7 +115,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
-    fs.fsyncSync(t.fd);
+    //fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -127,7 +128,7 @@ describe('Appending', function(){
 		debug(`Appending to fd ${t.fd2}`);
 
 		fs.writeSync(t.fd2, `Row ${nr}\n`);
-    fs.fsyncSync(t.fd2);
+    //fs.fsyncSync(t.fd2);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -137,7 +138,7 @@ describe('Appending', function(){
 		const nr = ++cnt;
 
 		fs.writeSync(t.fd, `Row ${nr}\n`);
-    fs.fsyncSync(t.fd);
+    //fs.fsyncSync(t.fd);
 		const line = await t.tail1.nextLine();
 		debug("Recieved line " + line );
 		expect(line).to.be.eql(`Row ${nr}`);
@@ -157,7 +158,7 @@ describe('Missing primary', function(){
 	it('starts in secondary', async function(){
 		await appendRow( filename );
 		await rename( filename, secondary );
-		await tail1.start();
+		await tail1.startP();
 		const row1 = await appendRow( secondary );
 		const line = await tail1.nextLine();
 		debug("Recieved line " + line );
@@ -228,6 +229,12 @@ describe('Find start', function(){
 		return `Row ${++rowcnt}\n`;
 	}
 
+	function onLine( line ){
+		if( ! line.match(/^Row /) ) return;
+		lines.push(line);
+		debug('gotline', line);
+	}
+	
 	before( async ()=>{
 		function zip(no){
 			return new Promise( (resolve,reject)=>{
@@ -264,16 +271,12 @@ describe('Find start', function(){
 		await zip(2); fs.unlinkSync( fname(2) );
 		await zip(3); fs.unlinkSync( fname(3) );
 
-		tail1.on('line', line =>{
-			if( ! line.match(/^Row /) ) return;
-			lines.push(line);
-			debug('gotline');
-		});
-
+		tail1.on('line', onLine );
 	});
 
 	after(async()=>{
 		debug('stop tail1');
+		tail1.off('line', onLine );
 		await tail1.stop();
 		try{ fs.unlinkSync( fname(3)+".gz" ) } catch(err){};
 		try{ fs.unlinkSync( fname(2)+".gz" ) } catch(err){};
@@ -286,10 +289,10 @@ describe('Find start', function(){
 	it("finds start in older file", async function(){
 		const target = 2;
 		found = await tail1.findStart( /^Row (\d+)$/, str => target - str );
+		expect(found).to.be.true;
 	});
 
 	it("processes files in order", function( done ){
-		expect(found).to.be.true;
 		tail1.once('eof', ()=>{
 			expect(lines).to.eql(['Row 2','Row 3','Row 4','Row 5']);
 			done();
@@ -321,12 +324,95 @@ describe('Find start', function(){
 	});
 });
 
+describe('Find start in secondary', function(){
+
+	const tail1 = new Tail( fname(0) );
+	const lines = [];
+	let fd, rowcnt = 0, eof;
+	
+	function fname(no){
+		return path.join(dir.name, "multi.log" + (no?`.${no}`:'') );
+	}
+	
+	function rowtext(){
+		return `Row ${++rowcnt}\n`;
+	}
+
+	before( async ()=>{
+		fd = await open( fname(1), 'w');
+		fs.writeSync(fd, "stuff\n");
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+
+		tail1.force = true;
+		tail1.on('error', err=>{}); // Ignore error
+
+		tail1.once('eof', ()=>{
+			eof = true;
+			debug('EOF');
+		});
+
+	});
+
+	after(async()=>{
+		debug('stop tail1');
+		await tail1.stop().catch(err=>debug('caught'))
+		try{ fs.unlinkSync( fname(1) ) } catch(err){};
+		try{ fs.unlinkSync( fname(0) ) } catch(err){};		
+	});
+
+
+	let found = false;
+	it("finds start in older file", async function(){
+		const target = 2;
+		found = await tail1.findStart( /^Row (\d+)$/, str => target - str ).catch(err=>debug('caught2'));
+		expect(found).to.be.true;
+	});
+
+	it("tails latest file", function( done ){
+		function onLine( line ){
+			if( line !== "Row 5" ) return;
+			tail1.off( 'line', onLine );
+			done();
+		}
+
+		tail1.on('line', onLine );
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+	});
+
+	it("stay on latest file", function( done ){
+		function onEof(){
+			fs.writeSync(fd, rowtext());
+			tail1.once('line', line =>{
+				expect(line).to.eql("Row 6");
+				done();
+			});
+		}
+
+		if( eof ) onEof();
+		else tail1.once('eof', onEof );
+	});
+
+	it("switches to the primary file when there is new content", async function(){
+		const row = await appendRow( fname(0) );
+		const line = await tail1.nextLine();
+		expect(line).to.be.eql( row );
+	});
+
+	
+});
+
+
 
 describe('Custom line-split', function(){
 
 	const tail1 = new Tail( filename );
 	const lines = [];
 	let fd, rowcnt = 0;
+
+	//tail1.on('error', err=>{console.warn("OUCH")}); // Ignore error
 	
 	function rowtext(){
 		return `Multiline\nRow ${++rowcnt}\n--end_of_rec--\n`;

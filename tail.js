@@ -49,6 +49,7 @@ const EventEmitter = require('events');
 
 const util = require('util');
 const fs_access = util.promisify(fs.access);
+const fs_stat = util.promisify( fs.stat );
 
 //let _idseq = 0;
 
@@ -128,58 +129,122 @@ class Tail extends EventEmitter {
 		return this;
 	}
 
-	start(){
-		return this.tryTail( this.filename )
-			.catch( async err =>{
-				if( err.code !== 'ENOENT' ) throw err;
-				this.err1 = err;
-				
-				const secondary = await this.getSecondary();
-				debug(`${this.filename} gone. Trying ${secondary}`);
-				return this.tryTail( secondary );
-			})
-			.catch( err =>{
-				if( this.err1 ){ // report error for the primary file
-					this.onError( this.err1 );
-					delete this.err1;
+	start( filename ){
+		const self = this;
+
+		if( !filename ) filename = self.filename;
+		
+		//debug('start', filename);
+
+		function onError( err ){
+			offEvents();
+
+			//debug('start err', err);
+
+			if( self.stopping ) return self.interrupt();
+			
+			if( filename === self.filename ){
+
+				//debug('start prime err', err);
+				if( err.code !== 'ENOENT' ){
+					return self.onError( err );
+				}
+
+				self.err1 = err;
+				self.getSecondary().then( secondary =>{
+					if( self.stopping ) return self.interrupt();
+
+					debug(`${self.filename} gone. Trying ${secondary}`);
+					self.starting = null;
+					self.start( secondary );
+				});
+
+			} else {
+
+				//debug('start sec err', err);
+				self.starting = null;
+				if( self.err1 ){ // report error for the primary file
+					self.onError( self.err1 );
+					delete self.err1;
 				} else {
-					this.onError( err );
+					self.onError( err );
 				}
 				
-				if( this.force ){
-					this.started = this.filename;
+				if( self.force ){
+					self.started = self.filename;
 				}
-			});
+
+			}
+			
+		}
+
+		function onReady(){
+			offEvents();
+			//debug('starting', self.starting, 'done');
+			self.starting = null;
+		}
+
+		function offEvents(){
+			self.off('tailError', onError );
+			self.off('error', onError );
+			self.off('ready', onReady);
+		}
+
+		if( this.started === filename ){
+			this.emit('ready', this.fd);
+			return;
+		}
+		
+		self.stop().then(()=>{
+			debug('starting', filename);
+			self.starting = filename;
+			self.on('tailError', onError );
+			self.on('error', onError );
+			self.on('ready', onReady );
+			self.tryTail( filename );
+		});
+		
 	}
 
-	startP(){
-		if( this.fd ) return Promise.resolve();
+	startP( filename ){
+		const self = this;
+		//if( self.fd ) return Promise.resolve();
+
+		if( self.started && self.started === filename ){
+			self.tryTail( filename );
+			return Promise.resolve(true);
+		}
 		
 		const p = new Promise( (resolve,reject) =>{
 
-			function errorListener( err ){
-				this.removeListener('ready', readyListener);
-				this.removeListener('error', errorListener);
+			function onError( err ){
+				self.off('ready', onReady );
+				self.off('error', onError );
+				//debug('startP reject');
 				reject( err );
 			}
 
-			function readyListener(){
-				this.removeListener('ready', readyListener);
-				this.removeListener('error', errorListener);
+			function onReady(){
+				self.off('ready', onReady );
+				self.off('error', onError );
+				//debug('startP resolve');
 				resolve(true);
 			}
 			
-			this.on('error', errorListener );
-			this.on('ready', readyListener );
+			self.on('error', onError );
+			self.on('ready', onReady );
 		});
 
-		this.start();
+		//debug('startP');
+		self.start( filename );
 		return p;
 	}
 
 	async getSecondary(){
 		//return this.filename + ".1";
 		if( this.secondary ) return this.secondary;
+		//debug('getSecondary');
+
 		const first = await this.secondaryFiles[Symbol.asyncIterator]().next();
 		return first.value;
 	}
@@ -188,6 +253,7 @@ class Tail extends EventEmitter {
 		const tail = this;
 		return {
 			async *[Symbol.asyncIterator]() {
+				//debug('in searchFiles');
 				yield tail.filename;
 				yield* tail.secondaryFiles;
 			}
@@ -209,7 +275,7 @@ class Tail extends EventEmitter {
 					let filename = `${base}.${count}`;
 					if( zip ) filename += ".gz";
 
-					//debug('searching for file', _id, filename);
+					//debug('searching for file', filename);
 
 					try {
 						const res = await fs_access(filename);
@@ -219,7 +285,7 @@ class Tail extends EventEmitter {
 						count ++;
 						continue counting;
 					} catch( err ){
-						//debug('not found', _id, err);
+						//debug('not found', err);
 
 						if( zip ){
 
@@ -260,8 +326,10 @@ class Tail extends EventEmitter {
 				this.setPos( pos );
 				break;
 			} catch( err ){
-				debug(err.message);
-				if( !['NOTFOUND','ENOENT','TARGETOLDER'].includes( err.code ) ) throw err;
+				//debug('fsif', err.message);
+				if( !['NOTFOUND','ENOENT','TARGETOLDER'].includes( err.code ) ){
+					throw err;
+				}
 				this.backlog.push( filename );
 				if( !this.err1 ) this.err1 = err;
 				this.started = null;
@@ -270,7 +338,11 @@ class Tail extends EventEmitter {
 
 		if( this.started ){
 			debug(`Found start in ${this.started} at pos ${this.startPos}`);
-			return await this.tryTail( this.started );
+			try {
+				return await this.startP( this.started );
+			} catch( err ){
+				debug('in fstt', err);
+			}
 		}
 
 		const err = this.err1;
@@ -290,7 +362,7 @@ class Tail extends EventEmitter {
 		throw err;
 	}
 
-	findStartInFile( filename, match, cmp ){
+	async findStartInFile( filename, match, cmp ){
 		/*
 			@param {string} filename - file to search for start
 			@param {RegExp} match - regexp for finding starting line
@@ -299,78 +371,80 @@ class Tail extends EventEmitter {
 
 		debug("Find start in", filename);
 
-		return new Promise( (resolve,reject)=>{
-			this.stop();
-			fs.stat( filename, ( err,stats )=>{
-				if( err ) return reject( err );
+		this._stop();
 
-				this.started = filename;
-				this.sepG = new RegExp( this.sep, 'g' );
-				this.ino = stats.ino;
-				this.setPos( 0 );
+		const stats = await fs_stat( filename );
+		
+		this.started = filename;
+		this.sepG = new RegExp( this.sep, 'g' );
+		this.ino = stats.ino;
+		this.setPos( 0 );
+		
+		//debug('Looking for first line');
+		let posFound = -1;
+		let valFound;
 
-				//debug('Looking for first line');
-				let posFound = -1;
-				let valFound;
-
-				this.onEndOfFile = this.onEndOfFileForFind;
-				this.onLine = (err, line, pos ) =>{
-					if( err ){
-						if( err.code != 'EOF' ) return reject( err );
-						
-						if( posFound >= 0 ){
-							err.message =
-								`The last matched line has the value ${valFound}. `+
-								`The target value comes after the end of this file.`;
-							return reject( err );
-						}
-
-						err.code = 'NOTFOUND'; // Might be in previous log
+		////#### returns position
+		return await new Promise( (resolve,reject) =>{
+		
+			this.onEndOfFile = this.onEndOfFileForFind;
+			this.onLine = (err, line, pos ) =>{
+				if( err ){
+					if( err.code != 'EOF' ){
 						return reject( err );
 					}
-
-					debug( `Line ${pos} »${line}«`);
 					
-					const found = line.match( match );
-					if( !found ) return setImmediate( this.getLine.bind(this) );
-					const compared = cmp( found[1] );
-
-					//## Detaild debug for every line found
-					//debug( this.posLast, found[1], compared, line );
-
-					if( compared == 0 ){
-						return resolve( this.posLast );
-					}
-
-					if( compared < 0 ){ // target line is before this
-						if( posFound >= 0 ) return resolve( this.posLast );
-						
-						const msg =
-									`The first matched line has the value ${found[1]}. `+
-									`The target value are probably in an older file.`;
-
-						const err = new Error( msg )
-						err.code = 'TARGETOLDER';
+					if( posFound >= 0 ){
+						err.message =
+							`The last matched line has the value ${valFound}. `+
+							`The target value comes after the end of this file.`
 						return reject( err );
-
 					}
-
-					if( compared > 0 ){ // target line is after this
-
-						// TODO: Jump around in file as to not have to read every
-						// single line. Will save time for large files!
-
-						posFound = this.posLast;
-						valFound = found[1];
-						return setImmediate( this.getLine.bind(this) );
-					}
-
-					throw new Error("Given comparison function returned " + compared);
-				};
-
-				this.readStuff();
-
-			});
+					
+					err.code = 'NOTFOUND'; // Might be in previous log
+					return reject( err );
+				}
+				
+				//debug( `Line ${pos} »${line}«`);
+				
+				const found = line.match( match );
+				if( !found ) return setImmediate( this.getLine.bind(this) );
+				const compared = cmp( found[1] );
+				
+				//## Detaild debug for every line found
+				//debug( this.posLast, found[1], compared, line );
+				
+				if( compared == 0 ){
+					return resolve( this.posLast );
+				}
+				
+				if( compared < 0 ){ // target line is before this
+					if( posFound >= 0 ) return resolve( this.posLast );
+					
+					const msg =
+								`The first matched line has the value ${found[1]}. `+
+								`The target value are probably in an older file.`;
+					
+					const err = new Error( msg )
+					err.code = 'TARGETOLDER';
+					return reject( err );
+					
+				}
+				
+				if( compared > 0 ){ // target line is after this
+					
+					// TODO: Jump around in file as to not have to read every
+					// single line. Will save time for large files!
+					
+					posFound = this.posLast;
+					valFound = found[1];
+					return setImmediate( this.getLine.bind(this) );
+				}
+				
+				return reject( new Error("Given comparison function returned " + compared ) );
+			};
+			
+			this.readStuff();
 		});
 	}
 	
@@ -378,51 +452,62 @@ class Tail extends EventEmitter {
 	nextLine(){
 		return new Promise( resolve => this.once('line', resolve ) );
 	}
-													
+
 	tryTail( filename ){
-		return new Promise( (resolve,reject) =>{
+		if( this.started && this.started !== filename ) this._stop();
+		// Might be started by findStart()
+		
+		//## TODO: continue from last pos if we used findStart()
+		
+		this.sepG = new RegExp( this.sep, 'g' );
 
-			if( this.started && this.started !== filename ) this.stop();
-			// Might be started by findStart()
-
-			//## TODO: continue from last pos if we used findStart()
+		fs.stat( filename, (err, stats )=>{
+			if( this.stopping ) return this.interrupt();
 			
-			this.sepG = new RegExp( this.sep, 'g' );
+			if( err ){
+				//debug('tryTail stat err', err);
+				return this.emit('tailError', err);
+			}
 			
-			fs.stat(filename, async (err,stats) =>{
-				if( err ) return reject( err );
-
-				debug('tryTail', filename, this.pos);
-
-				this.getStat( err, stats );				
-
-				//debug('lookup secondary');
-				const secondary = await this.getSecondary();
+			debug('tryTail', filename, this.pos);
+			
+			let start = stats.size;
+			if( typeof this.startPos == 'number' ){
+				if( this.startPos <= stats.size ) start = this.startPos;
+			} else if( this.startPos == 'start' ){
+				if( stats.size < this.cutoff ){
+					start = 0;
+				} else {
+					this.emit('skip',start);
+				}
+			}
+			
+			this.setPos( start );
+			this.ino = stats.ino;
+			
+			this.getSecondary().then( secondary =>{
 				if( filename === secondary ){
 					this.emit('secondary', secondary);
 				}
-
+				
 				this.onEndOfFile = this.onEndOfFileForTail;
 				this.onLine = this.onLineForTail;
+				
+				if( !this.watcher ){
+					const dirname = path.dirname( this.filename );
+					//debug('watcher', dirname);
+					this.watcher = fs.watch( dirname );
+					
+					this.watcher.on('change', this.checkDir.bind(this) );
+					this.watcher.on('error', this.onError.bind(this) );
+				}
 				
 				// Do not wait in case we don't start at the end
 				this.started = filename;
 				this.readStuff();
-
-				//debug('tryTail resolved');
-				resolve(true);
 			});
-
-			if( !this.watcher ){
-				const dirname = path.dirname( this.filename );
-				//debug('watcher', dirname);
-				this.watcher = fs.watch( dirname );
-
-				this.watcher.on('change', this.checkDir.bind(this) );
-				this.watcher.on('error', this.onError.bind(this) );
-			}
-
 		});
+
 	}
 
 	checkDir(type, name ){
@@ -434,26 +519,81 @@ class Tail extends EventEmitter {
 		const basename = path.basename( this.filename );
 		if( name !== basename ) return;
 
-		this.stop();
+		this._stop();
 		this.setPos(0);
 		this.emit('restart','PRIMEFOUND');
-		return setImmediate( this.start.bind(this) );
+		return this.start();
 	}
 
 	onError( err ){
 		// handle all file and watcher errors
-		this.stop();
-		//console.warn( new Error('Emitting error') );
-		//debug( 'Emitting', err );
-		this.emit( 'error', err );
+		this._stop(); // Do not wait
+		
+		if( this.listenerCount('error') ){
+			this.emit( 'error', err );
+		} else {
+			if( this.force ){
+				if( debug.enabled ){
+					console.trace( err.toString() );
+				} else {
+					console.warn( err.toString() );
+				}
+			} else {
+				console.warn("Tail object missing error listener. Force not used.");
+				throw err;
+			}
+		}
+
+	}
+	
+	stop(){
+		const self = this;
+
+		if( !self.starting ){
+			self._stop();
+			return Promise.resolve();
+		}
+
+		return new Promise( (resolve,reject) =>{
+
+			function onEvent(){
+				if( self.starting ){
+					debug("still starting", self.starting);
+					return;
+				}
+
+				self.off('error', onEvent );
+				self.off('tailError', onEvent );
+				self.off('ready', onEvent);
+
+				self.stopping = null;
+				self._stop();
+
+				//debug('stop done');
+				return resolve( self.started );
+			}
+
+			self.on('error', onEvent );
+			self.on('tailError', onEvent );
+			self.on('ready', onEvent );
+			self.stopping = self.starting;
+			debug('stop', self.stopping);
+		});
 	}
 
-	stop(){
+	interrupt(){
+		debug('Interrupt', this.stopping);
+		this.starting = null;
+		this.emit('tailError', 'interrupt');
+	}
+	
+	_stop(){
 		if( this.started ){
 			//debug(`Stops tail of ${this.started}`);
 		}
 		
 		if( this.watcher ){
+			//debug('stop watcher');
 			this.watcher.close();
 			delete this.watcher;
 		}
@@ -462,33 +602,13 @@ class Tail extends EventEmitter {
 			if( this.fd !==	 'init' ){
 				//debug("Closing fd " + this.fd);
 				fs.close( this.fd, err =>{
-					if( err ) return debug( "closing1 " + err );
+					if( err ) debug( "closing " + err );
 				});
 			}
 			delete this.fd;
 		}
 
 		this.started = null;
-	}
-
-	getStat( err, stats ){
-		if( err ) return this.onError( err );
-
-		let start = stats.size;
-		if( typeof this.startPos == 'number' ){
-			if( this.startPos <= stats.size ) start = this.startPos;
-		} else if( this.startPos == 'start' ){
-			if( stats.size <this.cutoff ){
-				start = 0;
-			} else {
-				this.emit('skip',start);
-			}
-		}
-
-		this.setPos( start );
-
-		this.ino = stats.ino;
-		//debug(`Starting tail at ${this.posSkip}`);
 	}
 
 	createReader(){
@@ -595,48 +715,90 @@ class Tail extends EventEmitter {
 	
 
 	onEndOfFileForTail(){
-		if( !this.started ) return;
+		const self = this;
+		if( !self.started ) return;
 
 		//debug("End of file");
-		//debug("Should we switch the streams?");
+		debug("Should we switch the streams?");
 
-		if( this.backlog.length ){
+		if( self.stopping ) return self.interrupt();
+		
+		const nextfile = self.backlog.pop();
+
+		if( nextfile && nextfile !== self.filename  ){
 			// We found a start in earlier file and are now catching up
-			const filename = this.backlog.pop();
+			
 			debug('continue catchup in the next file');
-			this.stop();
-			this.setPos(0);
-			this.emit('restart','CATCHUP');
-			return setImmediate( this.tryTail.bind( this, filename ) );
+			self._stop();
+			self.setPos(0);
+			debug("starting new tail", nextfile);
+
+			function onError( err ){
+				offEvents();
+				
+				//debug("handle error on end of file for tail");
+				if( self.stopping ) return self.interrupt();
+
+				self.starting = null;
+				self.onError( err );
+
+				if( self.force ){
+					self.starting = null;
+					self.start();
+				}
+			}
+
+			function onReady(){
+				offEvents();
+				debug('emitting restart');
+				self.starting = null;
+				self.emit('restart','CATCHUP');
+			}
+
+			function offEvents(){
+				self.off('tailError', onError );
+				self.off('error', onError );
+				self.off('ready', onReady);
+			}
+			
+			self.starting = nextfile;
+			self.on('tailError', onError );
+			self.on('error', onError );
+			self.on('ready', onReady );
+			
+			self.tryTail( nextfile );
+			
+			return true;
 		}
 		
-		fs.stat(this.filename, (err,stat) =>{
+		fs.stat(self.filename, (err,stat) =>{
 			if( err ){
 				debug( err );
+				self.emit('eof', self.pos);
 				return;
 			}
 			
-			if( this.ino != stat.ino ){
+			if( self.ino != stat.ino ){
 				if( stat.size ){
 					debug("Switching over to the new file");
-					this.stop();
-					this.setPos(0);
-					this.emit('restart','NEWPRIME');
-					return setImmediate( this.start.bind(this) );
+					self._stop();
+					self.setPos(0);
+					self.emit('restart','NEWPRIME');
+					return self.start();
 				}
 
 				// Wait until it has something to read
 
 				// Continue to emit that we reached eof				
-			} else if( stat.size < this.pos ){
+			} else if( stat.size < self.pos ){
 				debug("File truncated");
-				this.stop();
-				this.setPos(0);
-				this.emit('restart','TRUNCATE');
-				return setImmediate( this.start.bind(this) );
+				self._stop();
+				self.setPos(0);
+				self.emit('restart','TRUNCATE');
+				return self.start();
 			}
 
-			this.emit('eof', this.pos);
+			self.emit('eof', self.pos);
 		});
 
 	}
@@ -649,9 +811,11 @@ class Tail extends EventEmitter {
 	}
 
 	onLineForTail(err, line, pos){
-		if( err ) return reject( err );
+		if( err ){
+			return this.onError( err );
+		}
 		
-		debug( `Line ${pos}${this.posSkip?'/'+this.posSkip:''} »${line}«` +  (pos<this.posSkip?' skipped':'') +`(${this.pos})`);
+		//debug( `Line ${pos}${this.posSkip?'/'+this.posSkip:''} »${line}«` +  (pos<this.posSkip?' skipped':'') +`(${this.pos})`);
 		if( pos >= this.posSkip ){
 			this.emit('line', line );
 		}
@@ -661,6 +825,8 @@ class Tail extends EventEmitter {
 	
 	//## TODO: use byte pos for all these so that we do not have to reset pos
 	setPos( pos ){
+		if( pos ) debug('setPos', pos);
+
 		this.pos = 0; // byte pos
 		this.posLast = 0;
 		this.posNext = 0;
