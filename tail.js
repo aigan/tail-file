@@ -323,7 +323,7 @@ class Tail extends EventEmitter {
 		for await ( let filename of this.searchFiles ){
 			try {
 				const pos = await this.findStartInFile( filename, match, cmp );
-				this.setPos( pos );
+				this.setCharPos( pos );
 				break;
 			} catch( err ){
 				//debug('fsif', err.message);
@@ -337,7 +337,7 @@ class Tail extends EventEmitter {
 		}
 
 		if( this.started ){
-			debug(`Found start in ${this.started} at pos ${this.startPos}`);
+			debug(`Found start in ${this.started} at char pos ${this.startPos}`);
 			try {
 				return await this.startP( this.started );
 			} catch( err ){
@@ -378,7 +378,7 @@ class Tail extends EventEmitter {
 		this.started = filename;
 		this.sepG = new RegExp( this.sep, 'g' );
 		this.ino = stats.ino;
-		this.setPos( 0 );
+		this.setBytePos( 0 );
 		
 		//debug('Looking for first line');
 		let posFound = -1;
@@ -473,16 +473,19 @@ class Tail extends EventEmitter {
 			
 			let start = stats.size;
 			if( typeof this.startPos == 'number' ){
-				if( this.startPos <= stats.size ) start = this.startPos;
-			} else if( this.startPos == 'start' ){
-				if( stats.size < this.cutoff ){
-					start = 0;
-				} else {
-					this.emit('skip',start);
+				this.setCharPos( this.startPos );
+			} else {
+				if( this.startPos == 'start' ){
+					if( stats.size < this.cutoff ){
+						start = 0;
+					} else {
+						this.emit('skip',start);
+					}
 				}
+
+				this.setBytePos( start );
 			}
 			
-			this.setPos( start );
 			this.ino = stats.ino;
 			
 			this.getSecondary().then( secondary =>{
@@ -520,7 +523,7 @@ class Tail extends EventEmitter {
 		if( name !== basename ) return;
 
 		this._stop();
-		this.setPos(0);
+		this.setCharPos(0);
 		this.emit('restart','PRIMEFOUND');
 		return this.start();
 	}
@@ -730,7 +733,7 @@ class Tail extends EventEmitter {
 			
 			debug('continue catchup in the next file');
 			self._stop();
-			self.setPos(0);
+			self.setBytePos(0);
 			debug("starting new tail", nextfile);
 
 			function onError( err ){
@@ -782,7 +785,7 @@ class Tail extends EventEmitter {
 				if( stat.size ){
 					debug("Switching over to the new file");
 					self._stop();
-					self.setPos(0);
+					self.startPos = 'start';
 					self.emit('restart','NEWPRIME');
 					return self.start();
 				}
@@ -793,7 +796,7 @@ class Tail extends EventEmitter {
 			} else if( stat.size < self.pos ){
 				debug("File truncated");
 				self._stop();
-				self.setPos(0);
+				self.setBytePos(0);
 				self.emit('restart','TRUNCATE');
 				return self.start();
 			}
@@ -824,16 +827,29 @@ class Tail extends EventEmitter {
 	}
 	
 	//## TODO: use byte pos for all these so that we do not have to reset pos
-	setPos( pos ){
-		if( pos ) debug('setPos', pos);
+	setCharPos( charPos ){
+		if( charPos ) debug('setCharPos', charPos);
 
 		this.pos = 0; // byte pos
 		this.posLast = 0;
 		this.posNext = 0;
 
-		this.startPos = pos; // decoded pos
+		this.startPos = charPos; // decoded pos
+		if( charPos == 'start' ) charPos = 0;
+		this.posSkip = charPos;
+		this.txt = '';
+	}
+
+	setBytePos( pos ){
+		if( pos ) debug('setBytePos', pos);
+
 		if( pos == 'start' ) pos = 0;
-		this.posSkip = pos;
+		this.pos = pos; // byte pos
+		this.posLast = pos;
+		this.posNext = pos;
+
+		this.startPos = 0; // decoded pos
+		this.posSkip = 0;
 		this.txt = '';
 	}
 	
