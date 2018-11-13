@@ -307,14 +307,14 @@ describe('Find start', function(){
 		fs.writeSync(fd, rowtext());
 	});
 
-	xit("restarts at right position", function( done ){
-		const pos = tail1.pos;
+	it("restarts at right position", function( done ){
+		const charPos = tail1.posNext;
 		fs.writeSync(fd, rowtext());
 		fs.writeSync(fd, rowtext());
 		tail1.stop();
 		fs.closeSync(fd);
 
-		tail1.startPos = pos; // Explicitly not at end of file
+		tail1.startPos = charPos; // Explicitly not at end of file
 		tail1.once('line', line =>{
 			expect(line).to.eq('Row 7');
 			done();

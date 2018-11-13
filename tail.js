@@ -110,7 +110,7 @@ class Tail extends EventEmitter {
 
 		this.filename = filename;
 
-		if( typeof options == 'function' ){
+		if( typeof options === 'function' ){
 			cb = options;
 			options = undefined;
 		}
@@ -319,11 +319,12 @@ class Tail extends EventEmitter {
 
 		delete this.err1;
 		this.backlog = [];
+		let foundLine;
 
 		for await ( let filename of this.searchFiles ){
 			try {
-				const pos = await this.findStartInFile( filename, match, cmp );
-				this.setCharPos( pos );
+				foundLine = await this.findStartInFile( filename, match, cmp );
+				this.startPos = this.posSkip = this.posLast;
 				break;
 			} catch( err ){
 				//debug('fsif', err.message);
@@ -339,6 +340,7 @@ class Tail extends EventEmitter {
 		if( this.started ){
 			debug(`Found start in ${this.started} at char pos ${this.startPos}`);
 			try {
+				this.emit('line', foundLine );
 				return await this.startP( this.started );
 			} catch( err ){
 				debug('in fstt', err);
@@ -348,7 +350,7 @@ class Tail extends EventEmitter {
 		const err = this.err1;
 		if( err.code === 'TARGETOLDER' ) err.code = 'NOTFOUND';
 		
-		if( err.code == 'NOTFOUND' ){
+		if( err.code === 'NOTFOUND' ){
 			err.message = "Start not found in primary or any secondary file";
 			err.files = this.backlog;
 		}
@@ -384,13 +386,13 @@ class Tail extends EventEmitter {
 		let posFound = -1;
 		let valFound;
 
-		////#### returns position
+		////#### returns found line
 		return await new Promise( (resolve,reject) =>{
 		
 			this.onEndOfFile = this.onEndOfFileForFind;
 			this.onLine = (err, line, pos ) =>{
 				if( err ){
-					if( err.code != 'EOF' ){
+					if( err.code !== 'EOF' ){
 						return reject( err );
 					}
 					
@@ -414,8 +416,8 @@ class Tail extends EventEmitter {
 				//## Detaild debug for every line found
 				//debug( this.posLast, found[1], compared, line );
 				
-				if( compared == 0 ){
-					return resolve( this.posLast );
+				if( compared === 0 ){
+					return resolve( line );
 				}
 				
 				if( compared < 0 ){ // target line is before this
@@ -457,9 +459,11 @@ class Tail extends EventEmitter {
 		if( this.started && this.started !== filename ) this._stop();
 		// Might be started by findStart()
 		
-		//## TODO: continue from last pos if we used findStart()
-		
 		this.sepG = new RegExp( this.sep, 'g' );
+
+		if( this.started && this.started === filename && this.posNext ){
+			return this.startTail( filename );
+		}
 
 		fs.stat( filename, (err, stats )=>{
 			if( this.stopping ) return this.interrupt();
@@ -469,13 +473,12 @@ class Tail extends EventEmitter {
 				return this.emit('tailError', err);
 			}
 			
-			debug('tryTail', filename, this.pos);
 			
 			let start = stats.size;
-			if( typeof this.startPos == 'number' ){
+			if( typeof this.startPos === 'number' ){
 				this.setCharPos( this.startPos );
 			} else {
-				if( this.startPos == 'start' ){
+				if( this.startPos === 'start' ){
 					if( stats.size < this.cutoff ){
 						start = 0;
 					} else {
@@ -489,28 +492,31 @@ class Tail extends EventEmitter {
 			this.ino = stats.ino;
 			
 			this.getSecondary().then( secondary =>{
-				if( filename === secondary ){
-					this.emit('secondary', secondary);
-				}
-				
-				this.onEndOfFile = this.onEndOfFileForTail;
-				this.onLine = this.onLineForTail;
-				
-				if( !this.watcher ){
-					const dirname = path.dirname( this.filename );
-					//debug('watcher', dirname);
-					this.watcher = fs.watch( dirname );
-					
-					this.watcher.on('change', this.checkDir.bind(this) );
-					this.watcher.on('error', this.onError.bind(this) );
-				}
-				
-				// Do not wait in case we don't start at the end
-				this.started = filename;
-				this.readStuff();
+				if( filename === secondary ) this.emit('secondary', secondary);
+				this.startTail( filename );
 			});
 		});
 
+	}
+
+	startTail( filename ){
+		debug('startTail', filename, this.pos);
+
+		this.onEndOfFile = this.onEndOfFileForTail;
+		this.onLine = this.onLineForTail;
+		
+		if( !this.watcher ){
+			const dirname = path.dirname( this.filename );
+			//debug('watcher', dirname);
+			this.watcher = fs.watch( dirname );
+			
+			this.watcher.on('change', this.checkDir.bind(this) );
+			this.watcher.on('error', this.onError.bind(this) );
+		}
+		
+		// Do not wait in case we don't start at the end
+		this.started = filename;
+		this.getLine();
 	}
 
 	checkDir(type, name ){
@@ -652,8 +658,8 @@ class Tail extends EventEmitter {
 	readStuff(){
 		if( !this.started ) return;
 		this.createReader();
-		if( this.fd == 'init' ) return;
-		if( this.pos == 'init' ) return;
+		if( this.fd === 'init' ) return;
+		if( this.pos === 'init' ) return;
 		if( this.reading ) return;
 		this.reading = true;
 
@@ -781,7 +787,7 @@ class Tail extends EventEmitter {
 				return;
 			}
 			
-			if( self.ino != stat.ino ){
+			if( self.ino !== stat.ino ){
 				if( stat.size ){
 					debug("Switching over to the new file");
 					self._stop();
@@ -829,13 +835,14 @@ class Tail extends EventEmitter {
 	//## TODO: use byte pos for all these so that we do not have to reset pos
 	setCharPos( charPos ){
 		if( charPos ) debug('setCharPos', charPos);
-
+		//debug( 'curret', this.pos, this.posLast, this.posNext, this.posSkip );
+		
 		this.pos = 0; // byte pos
 		this.posLast = 0;
 		this.posNext = 0;
 
 		this.startPos = charPos; // decoded pos
-		if( charPos == 'start' ) charPos = 0;
+		if( charPos === 'start' ) charPos = 0;
 		this.posSkip = charPos;
 		this.txt = '';
 	}
@@ -843,10 +850,10 @@ class Tail extends EventEmitter {
 	setBytePos( pos ){
 		if( pos ) debug('setBytePos', pos);
 
-		if( pos == 'start' ) pos = 0;
+		if( pos === 'start' ) pos = 0;
 		this.pos = pos; // byte pos
-		this.posLast = pos;
-		this.posNext = pos;
+		this.posLast = 0;
+		this.posNext = 0;
 
 		this.startPos = 0; // decoded pos
 		this.posSkip = 0;
