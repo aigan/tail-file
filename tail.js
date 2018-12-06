@@ -344,6 +344,7 @@ class Tail extends EventEmitter {
 				return await this.startP( this.started );
 			} catch( err ){
 				debug('in fstt', err);
+				this.err1 = err;
 			}
 		}
 
@@ -421,7 +422,7 @@ class Tail extends EventEmitter {
 				}
 				
 				if( compared < 0 ){ // target line is before this
-					if( posFound >= 0 ) return resolve( this.posLast );
+					if( posFound >= 0 ) return resolve( line );
 					
 					const msg =
 								`The first matched line has the value ${found[1]}. `+
