@@ -341,6 +341,7 @@ class Tail extends EventEmitter {
 			debug(`Found start in ${this.started} at char pos ${this.startPos}`);
 			try {
 				this.emit('line', foundLine );
+				if( this.stopping || !this.started ) return;
 				return await this.startP( this.started );
 			} catch( err ){
 				debug('in fstt', err);
