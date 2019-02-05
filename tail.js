@@ -327,20 +327,24 @@ class Tail extends EventEmitter {
 				this.startPos = this.posSkip = this.posLast;
 				break;
 			} catch( err ){
-				//debug('fsif', err.message);
+				//debug('fsif', err.code, err.message);
 				if( !['NOTFOUND','ENOENT','TARGETOLDER'].includes( err.code ) ){
 					throw err;
+				} else if( err.code === 'NOTFOUND' && this.backlog.length ){
+					debug("Starting row inbetween files");
+				} else {
+					this.backlog.push( filename );
+					if( !this.err1 ) this.err1 = err;
+					this.started = null;
 				}
-				this.backlog.push( filename );
-				if( !this.err1 ) this.err1 = err;
-				this.started = null;
 			}
 		}
 
 		if( this.started ){
-			debug(`Found start in ${this.started} at char pos ${this.startPos}`);
+			debug(`Found start in ${this.started} at char pos ${this.startPos}: ${foundLine}`);
 			try {
-				this.emit('line', foundLine );
+				//debug('foundLine', foundLine);
+				if( typeof foundLine === 'string' ) this.emit('line', foundLine );
 				if( this.stopping || !this.started ) return;
 				return await this.startP( this.started );
 			} catch( err ){
@@ -402,7 +406,6 @@ class Tail extends EventEmitter {
 						err.message =
 							`The last matched line has the value ${valFound}. `+
 							`The target value comes after the end of this file.`
-						return reject( err );
 					}
 					
 					err.code = 'NOTFOUND'; // Might be in previous log

@@ -405,6 +405,72 @@ describe('Find start in secondary', function(){
 });
 
 
+describe('Find start between files', function(){
+
+	const tail1 = new Tail( fname(0) );
+	const lines = [];
+	let fd, rowcnt = 0, eof;
+	
+	function fname(no){
+		return path.join(dir.name, "multi.log" + (no?`.${no}`:'') );
+	}
+	
+	function rowtext(){
+		return `Row ${++rowcnt}\n`;
+	}
+
+	before( async ()=>{
+		fd = await open( fname(1), 'w');
+		fs.writeSync(fd, "stuff\n");
+		fs.writeSync(fd, rowtext());
+		rowcnt += 3;
+		fs.writeSync(fd, rowtext());
+
+		rowcnt += 3;
+
+		fd = await open( fname(0), 'w');
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+		rowcnt += 3;
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, "stuff\n");
+
+		tail1.on('error', err=>{}); // Ignore error
+
+		tail1.once('eof', ()=>{
+			eof = true;
+			debug('EOF');
+		});
+
+	});
+
+	after(async()=>{
+		debug('stop tail1');
+		await tail1.stop().catch(err=>debug('caught'))
+		try{ fs.unlinkSync( fname(1) ) } catch(err){};
+		try{ fs.unlinkSync( fname(0) ) } catch(err){};		
+	});
+
+
+	let found = false;
+	it("finds next awailible row", async function(){
+		const target = 7;
+
+		const nextLine = new Promise( (resolve,reject)=>{
+			tail1.once('line', line =>{
+				debug('gotline', line);
+				resolve( line );
+			});
+		});
+		
+		const found = await tail1.findStart( /^Row (\d+)$/, str => target - str ).catch(err=>debug('caught2', err));
+		expect(found).to.be.true;
+		const latestLine = await nextLine;
+		expect(latestLine).to.eql('Row 9');
+	});
+	
+});
+
 
 describe('Custom line-split', function(){
 
