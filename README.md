@@ -142,8 +142,8 @@ const mytail = new Tail( "filename", { ... options ... }, callback );
 *startPos* = 'end'
 >Where to start tailing. It can be `start` or `end` or an actual char position in the file. NB! Not to get mixed up with the byte postion of pos.
 
-*cutoff* = 5000
->New files appearing after tailing started, will be tailed from the start, unless they are larger than this many bytes, in which case they will be tailed from the tail.
+*cutoff* = 0
+>New files appearing after tailing started, will be tailed from the start, unless they are larger than this many bytes, in which case they will be tailed from the tail. The default is 0 which disables this check.
 
 *force* = false
 >If force is true, it will start waiting for a file to tail even if it can't find the file and also can't find the secondary file. The default is to send an error message with `ENOENT` telling that it can't find the file.

@@ -73,7 +73,7 @@ class Tail extends EventEmitter {
 		@prop {string|number} startPos - 'end', 'start' or char pos for next start
 		@prop {number} posLast - char pos of current line during findStart()
 		@prop {number} posNext - char pos of next line during findStart()
-		@prop {number} cutoff=5000 - max file size for starting at the top
+		@prop {number} cutoff=0 - max file size for starting at the top
 		@prop {boolean} force - start even if no files found
 		@prop {string|RegExp} sep=\n - Line separator
 		@prop {string} encoding=utf8 - Any encoding recognized by StringDecoder
@@ -97,7 +97,7 @@ class Tail extends EventEmitter {
 			ino: null,
 			watcher: null,
 			startPos: 'end',
-			cutoff: 5000,
+			cutoff: 0,
 			force: false,
 			sep: "\n",
 			decoder: null,
@@ -484,10 +484,10 @@ class Tail extends EventEmitter {
 				this.setCharPos( this.startPos );
 			} else {
 				if( this.startPos === 'start' ){
-					if( stats.size < this.cutoff ){
-						start = 0;
-					} else {
+					if( this.cutoff && stats.size > this.cutoff ){
 						this.emit('skip',start);
+					} else {
+						start = 0;
 					}
 				}
 
