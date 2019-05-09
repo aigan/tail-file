@@ -14,8 +14,8 @@ const zlib = require('zlib');
 const Tail = require('../tail');
 
 const dir = tmp.dirSync();
-//const dir = { name: __dirname };
-//debug('dir', dir.name);
+// const dir = { name: __dirname };
+// debug('dir', dir.name);
 
 const filename = path.join(dir.name,'file1.log');
 const secondary = path.join(dir.name,'file1.log.1');
@@ -47,13 +47,15 @@ describe('Tail default', function(){
 		const tail1 = new Tail(filename);
 
 		tail1.once('error', err=>{
-			tail1.stop();
-			if( err.code == 'ENOENT' ) return done();
-			done( err );
+			tail1.stop().then(()=>{
+				if( err.code == 'ENOENT' ) return done();
+				done( err );
+			});
 		});
 		tail1.once('ready', X=>{
-			tail1.stop();
-			done(new Error("failed to fail"));
+			tail1.stop().then( ()=>{
+				done(new Error("failed to fail"));
+			});
 		});		
 		tail1.start();
 	});
@@ -62,13 +64,14 @@ describe('Tail default', function(){
     debug('start emits ready if file exists');
 		const tail1 = new Tail(filename);
 		(async()=>{
-			const fd = await open( filename, 'a');
-			fs.writeSync(fd, `Row ${++cnt}\n`);
+			const fd_out = await open( filename, 'a');
+			fs.writeSync(fd_out, `Row ${++cnt}\n`);
 
-			tail1.once('ready', fd=>{
-				expect(fd).to.be.a('number');
-				tail1.stop();
-				fs.closeSync(fd);
+			tail1.once('ready', async fd_in =>{
+				debug('got ready', fd_in );
+				expect(fd_in).to.be.a('number');
+				await tail1.stop();
+				fs.closeSync(fd_out);
 				done();
 			});
 				
@@ -311,16 +314,19 @@ describe('Find start', function(){
 		const charPos = tail1.posNext;
 		fs.writeSync(fd, rowtext());
 		fs.writeSync(fd, rowtext());
-		tail1.stop();
-		fs.closeSync(fd);
 
-		tail1.startPos = charPos; // Explicitly not at end of file
-		tail1.once('line', line =>{
-			expect(line).to.eq('Row 7');
-			done();
-		});
+		(async()=>{
+			await tail1.stop();
+			fs.closeSync(fd);
+			
+			tail1.startPos = charPos; // Explicitly not at end of file
+			tail1.once('line', line =>{
+				expect(line).to.eq('Row 7');
+				done();
+			});
 
-		tail1.start();
+			tail1.start();
+		})();
 	});
 });
 

@@ -333,9 +333,11 @@ class Tail extends EventEmitter {
 				} else if( err.code === 'NOTFOUND' && this.backlog.length ){
 					debug("Starting row inbetween files");
 				} else {
+					debug('backlog', filename, err.code);
 					this.backlog.push( filename );
 					if( !this.err1 ) this.err1 = err;
 					this.started = null;
+					this.reading = false;
 				}
 			}
 		}
@@ -399,6 +401,7 @@ class Tail extends EventEmitter {
 			this.onLine = (err, line, pos ) =>{
 				if( err ){
 					if( err.code !== 'EOF' ){
+						debug("onLine", filename, "error", err.code);
 						return reject( err );
 					}
 					
@@ -583,7 +586,7 @@ class Tail extends EventEmitter {
 				self.stopping = null;
 				self._stop();
 
-				//debug('stop done');
+				// debug('stop done');
 				return resolve( self.started );
 			}
 
@@ -623,11 +626,12 @@ class Tail extends EventEmitter {
 		}
 
 		this.started = null;
+		this.reading = false;
 	}
 
 	createReader(){
 		if( this.fd ) return;
-		//debug('createReader');
+		// debug('createReader');
 		this.fd = 'init';
 		fs.open(this.started,'r', (err,fd) =>{
 			if(err) return this.onError( err );
@@ -644,7 +648,7 @@ class Tail extends EventEmitter {
 				const zlib = require('zlib');
 				const unzip = this.unzip = zlib.createGunzip();
 
-				//debug('unzipping', this.started);
+				// debug('unzipping', this.started);
 				unzip.on('close', ()=> this.decode( null ) );
 				unzip.on('end', ()=>{ this.unzip = null });
 				unzip.on('data', chunk => this.decode( chunk ) );
@@ -668,48 +672,54 @@ class Tail extends EventEmitter {
 		if( this.reading ) return;
 		this.reading = true;
 
-		//debug("Starts reading at " + this.pos);
+		// debug("Starts reading at " + this.pos);
 		if(!this.buf) this.buf = Buffer.alloc(this._bufsize);
 		fs.read( this.fd, this.buf, 0, this._bufsize, this.pos,
 						 this.append.bind(this) );
 	}
 
-	append(err, bytesRead, buf ){
+	append(err, bytesRead, buf ){  //void
+
 		if( err ){
 			this.reading = false;
 			return this.onLine( err );
 		}
 		
 		this.pos += bytesRead;
-		//debug(`Read ${bytesRead} bytes`);
 
 		if( this.unzip ){
 			if( bytesRead === 0 ) return this.unzip.end();
-			//debug('unzip bytes');
-			return this.unzip.write( buf.slice(0,bytesRead) );
+			// debug('unzip bytes');
+			this.unzip.write( buf.slice(0,bytesRead), undefined, ()=>{
+				this.reading = false;
+			});
+			return;
 		}
 
+		this.reading = false;
 		if( bytesRead === 0 ) return this.decode(null);
 		return this.decode( buf.slice(0,bytesRead) );
 	}
 
-	decode( chunk ){
-		this.reading = false;
-
-		//debug('decode chunk');
+	decode( chunk, cnt ){
+		// this.reading = false;
 
 		if( chunk === null ){
+			// debug('null chunk');
 			this.txt += this.decoder.end(); // might have partial characters
+			// this.reading = false;
 			return this.onEndOfFile();
 		}
 		
+		// debug('decode chunk', cnt, this.posLast );
+
 		this.txt += this.decoder.write( chunk );
 		this.getLine();
 	}
 
 	getLine(){
+		// debug("Textbuffer: " + this.txt);
 		const found = this.sepG.exec( this.txt );
-		//debug("Textbuffer: " + this.txt);
 		if( !found ) return this.readStuff();
 		//debug( found );
 		
@@ -722,7 +732,7 @@ class Tail extends EventEmitter {
 		this.txt = this.txt.substr( this.sepG.lastIndex );
 		this.sepG.lastIndex = 0;
 		//debug( "Rest " + this.txt );
-		//debug( `Line at ${this.posLast} »${line}«` );
+		// debug( `Line at ${this.posLast} »${line}«` );
 		
 		return this.onLine( null, line, this.posLast );
 	}
@@ -730,9 +740,9 @@ class Tail extends EventEmitter {
 
 	onEndOfFileForTail(){
 		const self = this;
+		// debug("End of file");
 		if( !self.started ) return;
 
-		//debug("End of file");
 		debug("Should we switch the streams?");
 
 		if( self.stopping ) return self.interrupt();
@@ -818,7 +828,7 @@ class Tail extends EventEmitter {
 	}
 
 	onEndOfFileForFind(){
-		//debug("End of file for next");
+		// debug("End of file for next");
 		const err = new Error("End of file");
 		err.code = 'EOF';
 		return this.onLine( err );
