@@ -327,11 +327,12 @@ class Tail extends EventEmitter {
 				this.startPos = this.posSkip = this.posLast;
 				break;
 			} catch( err ){
-				//debug('fsif', err.code, err.message);
+				// debug('fsif', err.code, err.message);
 				if( !['NOTFOUND','ENOENT','TARGETOLDER'].includes( err.code ) ){
 					throw err;
 				} else if( err.code === 'NOTFOUND' && this.backlog.length ){
 					debug("Starting row inbetween files");
+					break;
 				} else {
 					debug('backlog', filename, err.code);
 					this.backlog.push( filename );
@@ -407,22 +408,24 @@ class Tail extends EventEmitter {
 					
 					if( posFound >= 0 ){
 						err.message =
-							`The last matched line has the value ${valFound}. `+
-							`The target value comes after the end of this file.`
+						`The last matched line has the value ${valFound}. `+
+						`The target value comes after the end of this file.`
+						err.code = 'NOTFOUND';
+					} else {
+						err.code = 'TARGETOLDER'; // Might be in previous log
 					}
-					
-					err.code = 'NOTFOUND'; // Might be in previous log
+
 					return reject( err );
 				}
 				
-				//debug( `Line ${pos} »${line}«`);
+				// debug( `Line ${pos} »${line}«`);
 				
 				const found = line.match( match );
 				if( !found ) return setImmediate( this.getLine.bind(this) );
 				const compared = cmp( found[1] );
 				
 				//## Detaild debug for every line found
-				//debug( this.posLast, found[1], compared, line );
+				// debug( this.posLast, found[1], compared, line );
 				
 				if( compared === 0 ){
 					return resolve( line );

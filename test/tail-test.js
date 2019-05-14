@@ -251,6 +251,12 @@ describe('Find start', function(){
 			});
 		}
 
+		fd = await open( fname(4), 'w');
+		fs.writeSync(fd, "stuff\n");
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+
 		fd = await open( fname(3), 'w');
 		fs.writeSync(fd, "stuff\n");
 		fs.writeSync(fd, rowtext());
@@ -273,6 +279,7 @@ describe('Find start', function(){
 
 		await zip(2); fs.unlinkSync( fname(2) );
 		await zip(3); fs.unlinkSync( fname(3) );
+		await zip(4); fs.unlinkSync( fname(4) );
 
 		tail1.on('line', onLine );
 	});
@@ -281,6 +288,7 @@ describe('Find start', function(){
 		debug('stop tail1');
 		tail1.off('line', onLine );
 		await tail1.stop();
+		try{ fs.unlinkSync( fname(4)+".gz" ) } catch(err){};
 		try{ fs.unlinkSync( fname(3)+".gz" ) } catch(err){};
 		try{ fs.unlinkSync( fname(2)+".gz" ) } catch(err){};
 		try{ fs.unlinkSync( fname(1) ) } catch(err){};
@@ -290,21 +298,22 @@ describe('Find start', function(){
 
 	let found = false;
 	it("finds start in older file", async function(){
-		const target = 2;
+		const target = 5;
+		debug('looking for', target );
 		found = await tail1.findStart( /^Row (\d+)$/, str => target - str );
 		expect(found).to.be.true;
 	});
 
 	it("processes files in order", function( done ){
 		tail1.once('eof', ()=>{
-			expect(lines).to.eql(['Row 2','Row 3','Row 4','Row 5']);
+			expect(lines).to.eql(['Row 5','Row 6','Row 7','Row 8']);
 			done();
 		});
 	});
 
 	it("tails latest file", function( done ){
 		tail1.once('line', line =>{
-			expect(line).to.eq('Row 6');
+			expect(line).to.eq('Row 9');
 			done();
 		});
 		fs.writeSync(fd, rowtext());
@@ -321,7 +330,7 @@ describe('Find start', function(){
 			
 			tail1.startPos = charPos; // Explicitly not at end of file
 			tail1.once('line', line =>{
-				expect(line).to.eq('Row 7');
+				expect(line).to.eq('Row 10');
 				done();
 			});
 
@@ -345,6 +354,7 @@ describe('Find start in secondary', function(){
 	}
 
 	before( async ()=>{
+		try{ fs.unlinkSync( fname(0) ) } catch(err){};
 		fd = await open( fname(1), 'w');
 		fs.writeSync(fd, "stuff\n");
 		fs.writeSync(fd, rowtext());
@@ -352,7 +362,7 @@ describe('Find start in secondary', function(){
 		fs.writeSync(fd, rowtext());
 
 		tail1.force = true;
-		tail1.on('error', err=>{}); // Ignore error
+		tail1.on('error', err=>{ debug(err) }); // Ignore error
 
 		tail1.once('eof', ()=>{
 			eof = true;
@@ -473,6 +483,80 @@ describe('Find start between files', function(){
 		expect(found).to.be.true;
 		const latestLine = await nextLine;
 		expect(latestLine).to.eql('Row 9');
+	});
+	
+});
+
+
+describe('Find start between files with more in queue', function(){
+
+	const tail1 = new Tail( fname(0) );
+	const lines = [];
+	let fd, rowcnt = 0, eof;
+	
+	function fname(no){
+		return path.join(dir.name, "multi.log" + (no?`.${no}`:'') );
+	}
+	
+	function rowtext(){
+		return `Row ${++rowcnt}\n`;
+	}
+
+	before( async ()=>{
+		fd = await open( fname(2), 'w');
+		fs.writeSync(fd, "stuff\n");
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+
+		fd = await open( fname(1), 'w');
+		fs.writeSync(fd, "stuff\n");
+		fs.writeSync(fd, rowtext());
+		rowcnt += 3;
+		fs.writeSync(fd, rowtext());
+
+		rowcnt += 3;
+
+		fd = await open( fname(0), 'w');
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, rowtext());
+		rowcnt += 3;
+		fs.writeSync(fd, rowtext());
+		fs.writeSync(fd, "stuff\n");
+
+		tail1.on('error', err=>{}); // Ignore error
+
+		tail1.once('eof', ()=>{
+			eof = true;
+			debug('EOF');
+		});
+
+	});
+
+	after(async()=>{
+		debug('stop tail1');
+		await tail1.stop().catch(err=>debug('caught'))
+		try{ fs.unlinkSync( fname(2) ) } catch(err){};
+		try{ fs.unlinkSync( fname(1) ) } catch(err){};
+		try{ fs.unlinkSync( fname(0) ) } catch(err){};		
+	});
+
+
+	let found = false;
+	it("finds next awailible row", async function(){
+		const target = 9;
+		debug('looking for', target );
+
+		const nextLine = new Promise( (resolve,reject)=>{
+			tail1.once('line', line =>{
+				debug('gotline', line);
+				resolve( line );
+			});
+		});
+		
+		const found = await tail1.findStart( /^Row (\d+)$/, str => target - str ).catch(err=>debug('caught2', err));
+		expect(found).to.be.true;
+		const latestLine = await nextLine;
+		expect(latestLine).to.eql('Row 11');
 	});
 	
 });
