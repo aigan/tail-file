@@ -91,6 +91,7 @@ class Tail extends EventEmitter {
 			started: null,
 			pos: 'init',
 			reading: false,
+			readable: false, // only used by checkDir
 			fd: null,
 			buf: null,
 			txt: "",
@@ -534,13 +535,16 @@ class Tail extends EventEmitter {
 		debug(`Dir ${type}: ${name}`);
 
 		// It will decide if it's time to switch over
-		if( this.fd ) return this.readStuff();
+		if( this.fd ){
+			this.readable = true;
+			return this.readStuff();
+		}
 
 		const basename = path.basename( this.filename );
 		if( name !== basename ) return;
 
 		this._stop();
-		this.setCharPos(0);
+		this.setBytePos(0);
 		this.emit('restart','PRIMEFOUND');
 		return this.start();
 	}
@@ -607,6 +611,7 @@ class Tail extends EventEmitter {
 		this.emit('tailError', 'interrupt');
 	}
 	
+	// Stops without waiting on current task
 	_stop(){
 		if( this.started ){
 			//debug(`Stops tail of ${this.started}`);
@@ -674,6 +679,7 @@ class Tail extends EventEmitter {
 		if( this.pos === 'init' ) return;
 		if( this.reading ) return;
 		this.reading = true;
+		this.readable = false;
 
 		// debug("Starts reading at " + this.pos);
 		if(!this.buf) this.buf = Buffer.alloc(this._bufsize);
@@ -705,6 +711,7 @@ class Tail extends EventEmitter {
 	}
 
 	decode( chunk, cnt ){
+		// cnt is for debug
 		// this.reading = false;
 
 		if( chunk === null ){
@@ -798,7 +805,9 @@ class Tail extends EventEmitter {
 			return true;
 		}
 		
+		self.reading = true;
 		fs.stat(self.filename, (err,stat) =>{
+			self.reading = false;
 			if( err ){
 				debug( err );
 				self.emit('eof', self.pos);
@@ -824,6 +833,8 @@ class Tail extends EventEmitter {
 				self.emit('restart','TRUNCATE');
 				return self.start();
 			}
+
+			if( self.readable ) return self.readStuff();
 
 			self.emit('eof', self.pos);
 		});

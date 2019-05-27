@@ -45,7 +45,7 @@ mytail.on('restart', reason => {
   if( reason == 'PRIMEFOUND' ) console.log("Now we can finally start tailing. File has appeared");
   if( reason == 'NEWPRIME' ) console.log("We will switch over to the new file now");
   if( reason == 'TRUNCATE' ) console.log("The file got smaller. I will go up and continue");
-	if( reason == 'CATCHUP' ) console.log("We found a start in an earlier file and are now moving to the nextt one in the list");
+  if( reason == 'CATCHUP' ) console.log("We found a start in an earlier file and are now moving to the next one in the list");
 });
 
 mytail.start();
@@ -60,7 +60,7 @@ It will deliver new lines from a file.
  * When the file has been moved and new lines starts appearing in the original location, it will switch over to the new file.
  * But it will always finish up reading the rest of the lines from the current file. Not getting distracted by empty files.
  * When switching to a new file, it will start from the beginning, as to not miss any rows.
- * except if the new file actually was copied or moved into place, with too many existing rows, in which case it will continue from the bottom.
+ * Optionally skipping to the bottom if the file is larger than a given limit.
  * You can let tail-file search for the starting position, and it will continue at that position, even if it's in the secondary file.
  * It will never throw exceptions. No matter what type of errors. All errors are emitted as messages.
  * All the code is asynchronous. No waiting on file system. Tried to avoid all race conditions.
