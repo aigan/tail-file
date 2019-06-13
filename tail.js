@@ -523,12 +523,17 @@ class Tail extends EventEmitter {
 			this.watcher = fs.watch( dirname );
 			
 			this.watcher.on('change', this.checkDir.bind(this) );
-			this.watcher.on('error', this.onError.bind(this) );
+			this.watcher.on('error', this.checkDirError.bind(this) );
 		}
 		
 		// Do not wait in case we don't start at the end
 		this.started = filename;
 		this.getLine();
+	}
+
+	checkDirError( err ){
+		debug('watcher', err);
+		return this.onError( err );
 	}
 
 	checkDir(type, name ){
@@ -551,6 +556,7 @@ class Tail extends EventEmitter {
 
 	onError( err ){
 		// handle all file and watcher errors
+		debug('onError', err);
 		this._stop(); // Do not wait
 		
 		if( this.listenerCount('error') ){
@@ -570,15 +576,31 @@ class Tail extends EventEmitter {
 
 	}
 	
-	stop(){
+	async stop(){
 		const self = this;
+
+		self.stopping = self.started || self.filename;
+		
+		if( this.watcher ){
+			this.watcher.off('change', this.checkDir.bind(this) );
+			this.watcher.off('error', this.checkDirError.bind(this) );
+			
+			await new Promise( (resolve,reject) =>{
+				this.watcher.on('error', err => reject(err) );				
+				this.watcher.on('close', ()=>{
+					delete this.watcher;
+					resolve();
+				});
+				this.watcher.close();
+			});
+		}
 
 		if( !self.starting ){
 			self._stop();
-			return Promise.resolve();
+			return true;
 		}
 
-		return new Promise( (resolve,reject) =>{
+		await new Promise( (resolve,reject) =>{
 
 			function onEvent(){
 				if( self.starting ){
@@ -600,9 +622,11 @@ class Tail extends EventEmitter {
 			self.on('error', onEvent );
 			self.on('tailError', onEvent );
 			self.on('ready', onEvent );
-			self.stopping = self.starting;
 			debug('stop', self.stopping);
 		});
+
+		self.stopping = null;
+		return true;
 	}
 
 	interrupt(){
@@ -614,27 +638,33 @@ class Tail extends EventEmitter {
 	// Stops without waiting on current task
 	_stop(){
 		if( this.started ){
-			//debug(`Stops tail of ${this.started}`);
+			debug(`Stops tail of ${this.started}`);
 		}
 		
-		if( this.watcher ){
-			//debug('stop watcher');
-			this.watcher.close();
-			delete this.watcher;
-		}
+		// if( this.watcher ) throw(new Error('can not stop watcher async'));
 
 		if( this.fd ){
 			if( this.fd !==	 'init' ){
-				//debug("Closing fd " + this.fd);
-				fs.close( this.fd, err =>{
-					if( err ) debug( "closing " + err );
-				});
+				// debug("Closing fd " + this.fd);
+				try {
+					fs.closeSync( this.fd );
+				} catch( err ){
+					debug( "closing", err );
+				}
 			}
 			delete this.fd;
 		}
+		
+		this.pos = 0; // byte pos
+		this.posLast = 0;
+		this.posNext = 0;
+		this.posSkip = 0;
+		this.txt = '';
 
 		this.started = null;
 		this.reading = false;
+		this.readable = false;
+		this.stopping = null;
 	}
 
 	createReader(){
@@ -681,7 +711,7 @@ class Tail extends EventEmitter {
 		this.reading = true;
 		this.readable = false;
 
-		// debug("Starts reading at " + this.pos);
+		// debug("Starts reading at " + this.pos, this.fd);
 		if(!this.buf) this.buf = Buffer.alloc(this._bufsize);
 		fs.read( this.fd, this.buf, 0, this._bufsize, this.pos,
 						 this.append.bind(this) );
@@ -691,6 +721,8 @@ class Tail extends EventEmitter {
 
 		if( err ){
 			this.reading = false;
+			debug('readStuff err', err );
+			if( !this.started || !this.fd || this.stopping ) return;
 			return this.onLine( err );
 		}
 		
@@ -809,12 +841,8 @@ class Tail extends EventEmitter {
 		fs.stat(self.filename, (err,stat) =>{
 			self.reading = false;
 			if( err ){
-				debug( err );
-				self.emit('eof', self.pos);
-				return;
-			}
-			
-			if( self.ino !== stat.ino ){
+				debug( 'onEndOfFileForTail stat', err );
+			} else if( self.ino !== stat.ino ){
 				if( stat.size ){
 					debug("Switching over to the new file");
 					self._stop();

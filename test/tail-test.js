@@ -28,7 +28,7 @@ function event( emitter, type ){
 	});
 }
 
-after(async()=>{
+after(async ()=>{
 	try{ fs.unlinkSync( filename ) } catch(err){};
 	try{ fs.unlinkSync( secondary ) } catch(err){};
 });
@@ -98,10 +98,10 @@ describe('Appending', function(){
 		return;
 	});
 	
-	after(async()=>{
+	after(async ()=>{
 		await t.tail1.stop();
-		fs.closeSync(t.fd);	
-		fs.closeSync(t.fd2);	
+		fs.closeSync(t.fd);
+		fs.closeSync(t.fd2);
 	});
 
 	it("emits line on append", async function(){
@@ -149,14 +149,15 @@ describe('Appending', function(){
 });
 
 describe('Missing primary', function(){
-	const tail1 = new Tail(filename);
+	let tail1;
 
-	before(async ()=>{
+	before( ()=>{
 		try{ fs.unlinkSync( filename ) } catch(err){};
 		try{ fs.unlinkSync( secondary ) } catch(err){};
+		tail1 = new Tail(filename);
 	});
 
-	after( async ()=> tail1.stop() );
+	after( ()=> tail1.stop() );
 
 	it('starts in secondary', async function(){
 		await appendRow( filename );
@@ -171,7 +172,7 @@ describe('Missing primary', function(){
 
 describe('File rotation', function(){
 
-	const tail1 = new Tail(filename);
+	let tail1;
 
 	before( async ()=>{
 		try{ fs.unlinkSync( filename ) } catch(err){};
@@ -180,10 +181,11 @@ describe('File rotation', function(){
 		await appendRow( filename );
 		await appendRow( filename );
 
+		tail1 = new Tail(filename);
 		await tail1.startP();
 	});
 
-	after( async ()=> tail1.stop() );
+	after( ()=> tail1.stop() );
 	
 	it("emits line on append", async function(){
 		
@@ -220,7 +222,7 @@ describe('File rotation', function(){
 
 describe('Find start', function(){
 
-	const tail1 = new Tail( fname(0) );
+	let tail1;
 	const lines = [];
 	let fd, rowcnt = 0;
 	
@@ -239,6 +241,8 @@ describe('Find start', function(){
 	}
 	
 	before( async ()=>{
+		tail1 = new Tail( fname(0) );
+
 		function zip(no){
 			return new Promise( (resolve,reject)=>{
 				const name = fname(no);
@@ -284,7 +288,7 @@ describe('Find start', function(){
 		tail1.on('line', onLine );
 	});
 
-	after(async()=>{
+	after(async ()=>{
 		debug('stop tail1');
 		tail1.off('line', onLine );
 		await tail1.stop();
@@ -341,7 +345,7 @@ describe('Find start', function(){
 
 describe('Find start in secondary', function(){
 
-	const tail1 = new Tail( fname(0) );
+	let tail1;
 	const lines = [];
 	let fd, rowcnt = 0, eof;
 	
@@ -354,6 +358,7 @@ describe('Find start in secondary', function(){
 	}
 
 	before( async ()=>{
+		tail1 = new Tail( fname(0) );
 		try{ fs.unlinkSync( fname(0) ) } catch(err){};
 		fd = await open( fname(1), 'w');
 		fs.writeSync(fd, "stuff\n");
@@ -371,7 +376,7 @@ describe('Find start in secondary', function(){
 
 	});
 
-	after(async()=>{
+	after(async ()=>{
 		debug('stop tail1');
 		await tail1.stop().catch(err=>debug('caught'))
 		try{ fs.unlinkSync( fname(1) ) } catch(err){};
@@ -423,7 +428,7 @@ describe('Find start in secondary', function(){
 
 describe('Find start between files', function(){
 
-	const tail1 = new Tail( fname(0) );
+	let tail1;
 	const lines = [];
 	let fd, rowcnt = 0, eof;
 	
@@ -436,6 +441,7 @@ describe('Find start between files', function(){
 	}
 
 	before( async ()=>{
+		tail1 = new Tail( fname(0) );
 		fd = await open( fname(1), 'w');
 		fs.writeSync(fd, "stuff\n");
 		fs.writeSync(fd, rowtext());
@@ -460,7 +466,7 @@ describe('Find start between files', function(){
 
 	});
 
-	after(async()=>{
+	after(async ()=>{
 		debug('stop tail1');
 		await tail1.stop().catch(err=>debug('caught'))
 		try{ fs.unlinkSync( fname(1) ) } catch(err){};
@@ -490,7 +496,7 @@ describe('Find start between files', function(){
 
 describe('Find start between files with more in queue', function(){
 
-	const tail1 = new Tail( fname(0) );
+	let tail1;
 	const lines = [];
 	let fd, rowcnt = 0, eof;
 	
@@ -503,6 +509,7 @@ describe('Find start between files with more in queue', function(){
 	}
 
 	before( async ()=>{
+		tail1 = new Tail( fname(0) );
 		fd = await open( fname(2), 'w');
 		fs.writeSync(fd, "stuff\n");
 		fs.writeSync(fd, rowtext());
@@ -532,7 +539,7 @@ describe('Find start between files with more in queue', function(){
 
 	});
 
-	after(async()=>{
+	after(async ()=>{
 		debug('stop tail1');
 		await tail1.stop().catch(err=>debug('caught'))
 		try{ fs.unlinkSync( fname(2) ) } catch(err){};
@@ -564,7 +571,7 @@ describe('Find start between files with more in queue', function(){
 
 describe('Custom line-split', function(){
 
-	const tail1 = new Tail( filename );
+	let tail1;
 	const lines = [];
 	let fd, rowcnt = 0;
 
@@ -575,6 +582,7 @@ describe('Custom line-split', function(){
 	}
 
 	before( async ()=>{
+		tail1 = new Tail( filename );
 
 		fd = await open( filename, 'w');
 		fs.writeSync(fd, rowtext());
@@ -582,7 +590,7 @@ describe('Custom line-split', function(){
 		fs.writeSync(fd, rowtext());
 	});
 
-	after(async()=>{
+	after(async ()=>{
 		debug('stop tail1');
 		await tail1.stop();
 	});
