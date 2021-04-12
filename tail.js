@@ -729,7 +729,10 @@ class Tail extends EventEmitter {
 		this.pos += bytesRead;
 
 		if( this.unzip ){
-			if( bytesRead === 0 ) return this.unzip.end();
+			if( bytesRead === 0 ){
+				this.decode( null );
+				return this.unzip.end();
+			}
 			// debug('unzip bytes');
 			this.unzip.write( buf.slice(0,bytesRead), undefined, ()=>{
 				this.reading = false;
