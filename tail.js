@@ -172,7 +172,8 @@ class Tail extends EventEmitter {
 				}
 				
 				if( self.force ){
-					self.started = self.filename;
+					debug("force tail of", self.filename);
+					this.startTail( self.filename );
 				}
 
 			}
@@ -468,6 +469,8 @@ class Tail extends EventEmitter {
 	}
 
 	tryTail( filename ){
+		//debug("tryTail", filename);
+		
 		if( this.started && this.started !== filename ) this._stop();
 		// Might be started by findStart()
 		
@@ -638,7 +641,7 @@ class Tail extends EventEmitter {
 	// Stops without waiting on current task
 	_stop(){
 		if( this.started ){
-			debug(`Stops tail of ${this.started}`);
+			debug(`stops tail of ${this.started}`);
 		}
 		
 		// if( this.watcher ) throw(new Error('can not stop watcher async'));
@@ -669,7 +672,8 @@ class Tail extends EventEmitter {
 
 	createReader(){
 		if( this.fd ) return;
-		// debug('createReader');
+		//debug('createReader');
+		//console.warn(Error('createReader'));
 		this.fd = 'init';
 		fs.open(this.started,'r', (err,fd) =>{
 			if(err) return this.onError( err );
@@ -695,11 +699,22 @@ class Tail extends EventEmitter {
 				
 			}
 
-			//debug("Opened file as fd " + fd);
-			this.emit('ready', fd);
-			this.fd = fd;
-			this.readStuff();
+			// Get ino if not already done
+			if( !this.ino ) return fs.fstat( fd, (err, stats )=>{
+				if( err ) return onError(err);
+				this.ino = stats.ino;
+				this.onCreateReader( fd );
+			});
+
+			this.onCreateReader( fd );
 		});
+	}
+
+	onCreateReader(fd){
+		debug("Opened file as fd", fd, "ino", this.ino, "pos", this.pos);
+		this.emit('ready', fd);
+		this.fd = fd;
+		this.readStuff();
 	}
 
 	readStuff(){
@@ -788,7 +803,7 @@ class Tail extends EventEmitter {
 		// debug("End of file");
 		if( !self.started ) return;
 
-		debug("Should we switch the streams?");
+		debug("Should we switch the streams?", self.backlog );
 
 		if( self.stopping ) return self.interrupt();
 		
@@ -843,11 +858,12 @@ class Tail extends EventEmitter {
 		self.reading = true;
 		fs.stat(self.filename, (err,stat) =>{
 			self.reading = false;
+
 			if( err ){
 				debug( 'onEndOfFileForTail stat', err );
 			} else if( self.ino !== stat.ino ){
 				if( stat.size ){
-					debug("Switching over to the new file");
+					debug("Switching over from", self.ino, "to the new file", stat.ino);
 					self._stop();
 					self.startPos = 'start';
 					self.emit('restart','NEWPRIME');

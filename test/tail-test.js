@@ -611,6 +611,36 @@ describe('Custom line-split', function(){
 	});
 });
 
+describe('Force start of missing file', ()=>{
+	let tail1;
+	let row1;
+
+	before( ()=>{
+		try{ fs.unlinkSync( filename ) } catch(err){};
+		try{ fs.unlinkSync( secondary ) } catch(err){};
+		tail1 = new Tail(filename, {force:true});
+	});
+
+	after( ()=> tail1.stop() );
+
+	it('reads from primary on creation', function(done){
+		tail1.once('line', line =>{
+			//debug("Recieved line " + line );
+			expect(line).to.eq(row1);
+			done();
+		});
+
+		tail1.on('error', err=>{
+			appendRow( filename ).then( row =>{
+				row1 = row;
+			});
+		});
+		
+		tail1.start();
+	});
+
+})
+
 
 async function appendRow( filename ){
 	const nr = ++cnt;
